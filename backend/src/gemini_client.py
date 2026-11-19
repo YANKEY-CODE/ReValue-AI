@@ -116,9 +116,9 @@ class GeminiClient:
     private backend environment.
     """
 
-    def __init__(self, api_key: str | None = None, model: str = GEMINI_MODEL) -> None:
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        self.model = model
+        self.model = model or os.getenv("REVALUE_GEMINI_MODEL") or GEMINI_MODEL
 
     @property
     def is_authorized(self) -> bool:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from .gemini_client import GEMINI_MODEL, GeminiAuthorizationRequired, GeminiClient, GeminiTemporaryUnavailable
+from .gemini_client import GeminiAuthorizationRequired, GeminiClient, GeminiTemporaryUnavailable
 from .phone_catalogue import normalize_gemini_candidates
 from .schemas import DeviceCandidate, DeviceIdentificationResult, ImageInput
 
@@ -47,7 +47,7 @@ def identify_device(
     images: list[ImageInput],
     client: GeminiClient | None = None,
 ) -> DeviceIdentificationResult:
-    client = client or GeminiClient(model=GEMINI_MODEL)
+    client = client or GeminiClient()
     payload_images = [asdict(image) for image in images]
     try:
         response = client.generate_structured(

@@ -1,2 +1,2 @@
-date,status,experiment_id,model,dataset_version,split,notes,crack_precision,crack_recall,scratch_recall,mAP50,mAP50_95,inference_ms,artifact_path
-2026-11-19,historical_repo_record,baseline-v0.2,revalue_exterior_yolo11n_v0.2,unverified,reported_held_out,"Previous repo evaluation; not independently rerun",0.369,0.230,0.743,0.426,0.181,,backend/models/MODEL_EVALUATION_v0.2.txt
+date,status,experiment_id,model,dataset_version,split,notes,crack_precision,crack_recall,scratch_recall,mAP50,mAP50_95,inference_ms,artifact_path,overall_precision,overall_recall,overall_f1,scratch_precision,confidence,image_size
+2026-11-19,historical_repo_record,baseline-v0.2,revalue_exterior_yolo11n_v0.2,unverified,reported_held_out,Imported from the bundled report; experiment date and evaluation settings not independently verified,0.369,0.230,0.743,0.426,0.181,,backend/models/MODEL_EVALUATION_v0.2.txt,0.495,0.486,,0.621,,

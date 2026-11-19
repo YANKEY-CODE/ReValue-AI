@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from .gemini_client import GEMINI_MODEL, GeminiAuthorizationRequired, GeminiClient, GeminiTemporaryUnavailable
+from .gemini_client import GeminiAuthorizationRequired, GeminiClient, GeminiTemporaryUnavailable
 from .phone_catalogue import get_catalogue_device, match_catalogue_candidate, normalize_storage, normalize_text
 from .schemas import MarketObservation
 
@@ -97,7 +97,7 @@ class MarketEvidenceProvider(Protocol):
 
 class GeminiGroundedMarketEvidenceProvider:
     def __init__(self, client: GeminiClient | None = None) -> None:
-        self.client = client or GeminiClient(model=GEMINI_MODEL)
+        self.client = client or GeminiClient()
 
     def retrieve(self, confirmed_device: dict[str, Any], condition_group: str) -> dict[str, Any]:
         prompt = build_market_search_prompt(confirmed_device, condition_group)

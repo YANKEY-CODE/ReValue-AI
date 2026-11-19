@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from .device_identification import identify_device
 from .exterior_analysis import analyze_exterior
 from .grading_rules import grade_from_atomic_damage
+from .image_upload import decode_image
 from .local_valuation import local_fallback_valuation
 from .market_evidence import exterior_grade_error_response, normalize_exterior_grade, parse_storage_gb, retrieve_current_market_evidence
 from .phone_catalogue import confirm_device, get_catalogue_device, search_catalogue
@@ -23,6 +24,7 @@ from .valuation import value_from_market_observations
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 APP_HTML = APP_DIR / "ReValue-AI-Prototype-v1.16.1-predeployment-preview.html"
 VENDOR_DIR = Path(__file__).resolve().parents[1] / "vendor"
+MAX_JSON_BYTES = 56 * 1024 * 1024
 SESSION_TTL_SECONDS = 60 * 60
 REMOTE_VIEWS = ["front", "back", "camera", "left_side", "right_side"]
 REMOTE_VIEW_LABELS = {
@@ -115,7 +117,7 @@ def _public_session(session: dict[str, Any], *, include_images: bool = True) -> 
         "expires_at_epoch": session["expires_at_epoch"],
         "received_count": received,
         "required_count": len(REMOTE_VIEWS),
-        "complete": received == len(REMOTE_VIEWS) and session["status"] in {"ready", "complete"},
+        "complete": received == len(REMOTE_VIEWS) and session["status"] == "complete",
         "views": views,
     }
 
@@ -191,11 +193,36 @@ const VIEWS={json.dumps(REMOTE_VIEWS)};
 const LABELS={labels};
 let current=0, pending=null;
 function render(){{document.getElementById('stage').textContent=`${{Math.min(current+1,VIEWS.length)}} of ${{VIEWS.length}} Â· ${{LABELS[VIEWS[current]]||''}}`;document.getElementById('progress').innerHTML=VIEWS.map((v,i)=>`<i class="dot ${{i<current?'done':i===current?'current':''}}"></i>`).join('');document.getElementById('sendBtn').style.display=current>=VIEWS.length?'block':'none'}}
-function openCamera(){{document.getElementById('fileInput').click()}}
-document.getElementById('fileInput').addEventListener('change',e=>{{const file=e.target.files&&e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{{pending={{name:file.name,type:file.type||'image/jpeg',data:String(reader.result)}};document.getElementById('cameraBox').innerHTML=`<img src="${{pending.data}}" alt="Preview"><div class="guide"></div>`;document.getElementById('previewActions').style.display='grid'}};reader.readAsDataURL(file)}});
+function openCamera(){{if(posting||current>=VIEWS.length)return;document.getElementById('fileInput').click()}}
+document.getElementById('fileInput').addEventListener('change',e=>{{const file=e.target.files&&e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{{pending={{name:file.name,type:file.type||'image/jpeg',data:String(reader.result)}};document.getElementById('cameraBox').innerHTML=`<img src="${{pending.data}}" alt="Preview"><div class="guide"></div>`;document.getElementById('previewActions').style.display='grid'}};reader.onerror=()=>alert('Could not read the image. Please try another photo.');reader.readAsDataURL(file)}});
 function retake(){{pending=null;document.getElementById('previewActions').style.display='none';document.getElementById('cameraBox').innerHTML='<div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div>';document.getElementById('fileInput').value=''}}
-async function usePhoto(){{if(!pending)return;const view=VIEWS[current];const bytes=pending.data.split(',')[1]||'';await fetch(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/photo`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{view,filename:pending.name,mime_type:pending.type,bytes_b64:bytes}})}});current++;pending=null;document.getElementById('previewActions').style.display='none';document.getElementById('fileInput').value='';document.getElementById('cameraBox').innerHTML='<div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div>';render()}}
-async function sendPhotos(){{await fetch(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/complete`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:'{{}}'}});document.getElementById('captureCard').style.display='none';document.getElementById('doneText').style.display='block'}}
+let posting=false;
+async function postCapture(path, payload){{
+  const response=await fetch(path,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error||'Upload failed. Please try again.');
+}}
+async function usePhoto(){{
+  if(!pending||posting||current>=VIEWS.length)return;
+  posting=true;
+  try{{
+    await postCapture(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/photo`,{{
+      view:VIEWS[current],filename:pending.name,mime_type:pending.type,bytes_b64:pending.data.split(',')[1]||''
+    }});
+    current++;
+    retake();
+    render();
+  }}catch(error){{alert(error.message)}}finally{{posting=false}}
+}}
+async function sendPhotos(){{
+  if(posting||current<VIEWS.length)return;
+  posting=true;
+  try{{
+    await postCapture(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/complete`,{{}});
+    document.getElementById('captureCard').style.display='none';
+    document.getElementById('doneText').style.display='block';
+  }}catch(error){{alert(error.message)}}finally{{posting=false}}
+}}
 render();
 </script>
 </body>
@@ -205,9 +232,16 @@ render();
 class ReValueHandler(BaseHTTPRequestHandler):
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
+        if length < 0:
+            raise ValueError("Invalid Content-Length")
+        if length > MAX_JSON_BYTES:
+            raise OverflowError("Request exceeds upload limit")
         if not length:
             return {}
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Expected a JSON object")
+        return payload
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
@@ -277,7 +311,15 @@ class ReValueHandler(BaseHTTPRequestHandler):
         _json_response(self, 404, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        payload = self._read_json()
+        try:
+            payload = self._read_json()
+        except OverflowError:
+            self.close_connection = True
+            _json_response(self, 413, {"status": "error", "error": "Request exceeds upload limit."})
+            return
+        except ValueError:
+            _json_response(self, 400, {"status": "error", "error": "Expected a valid JSON object."})
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/remote-session":
@@ -297,8 +339,14 @@ class ReValueHandler(BaseHTTPRequestHandler):
             if view not in REMOTE_VIEWS:
                 _json_response(self, 400, {"status": "error", "error": "valid_view_required"})
                 return
-            if not payload.get("bytes_b64"):
-                _json_response(self, 400, {"status": "error", "error": "image_bytes_required"})
+            try:
+                image = ImageInput(view=view, mime_type=payload.get("mime_type") or "image/jpeg", bytes_b64=payload.get("bytes_b64"))
+                decode_image(image).close()
+            except ValueError as exc:
+                _json_response(self, 400, {"status": "error", "error": str(exc)})
+                return
+            except ImportError:
+                _json_response(self, 503, {"status": "error", "error": "Image dependencies unavailable."})
                 return
             session["views"][view] = {
                 "view": view,
@@ -324,7 +372,7 @@ class ReValueHandler(BaseHTTPRequestHandler):
                 return
             session["status"] = "complete"
             session["completed_at_epoch"] = time.time()
-            _json_response(self, 200, _public_session(session))
+            _json_response(self, 200, _public_session(session, include_images=False))
             return
         if self.path == "/identify-device":
             images = [ImageInput(**item) for item in payload.get("images", [])]
@@ -343,8 +391,19 @@ class ReValueHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/analyze-exterior":
-            images = [ImageInput(**item) for item in payload.get("images", [])]
-            _json_response(self, 200, analyze_exterior(images))
+            try:
+                items = payload.get("images")
+                if not isinstance(items, list) or len(items) > 5:
+                    raise TypeError("Expected a list of at most five images")
+                images = [ImageInput(**item) for item in items]
+                if any(not isinstance(image.view, str) for image in images):
+                    raise TypeError("Expected string view labels")
+            except TypeError:
+                _json_response(self, 400, {"status": "error", "error": "Expected up to five labelled exterior images."})
+                return
+            result = analyze_exterior(images)
+            status = {"error": 400, "blocked": 503}.get(result["status"], 200)
+            _json_response(self, status, result)
             return
 
         if self.path == "/market-evidence/retrieve":

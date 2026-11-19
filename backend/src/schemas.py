@@ -18,7 +18,7 @@ DamageType = Literal[
     "other_visible_damage",
 ]
 
-ViewType = Literal["front", "back", "camera", "side", "unknown"]
+ViewType = Literal["front", "back", "camera", "left_side", "right_side", "side", "unknown"]
 Severity = Literal["minor", "moderate", "severe", "unknown"]
 VerificationState = Literal["confirmed", "unverified", "rejected"]
 

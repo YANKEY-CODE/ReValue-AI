@@ -1,5 +1,7 @@
 # ReValue AI Real Phone Catalogue v0.2
 
+For the current FYP1 setup, verification and evaluation workflow, see the [FYP development guide](fyp/README.md).
+
 Phase 6B continuation package for Operator review.
 
 Status: backend catalogue integration complete.
