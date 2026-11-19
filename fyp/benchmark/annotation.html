@@ -38,6 +38,7 @@ small { color: #bbb; }
     <small id="source"></small>
     <label id="kindLabel">Image disposition <select id="kind"><option value="positive">Damage boxes</option><option value="clean">Verified clean</option><option value="exclude">Exclude</option></select></label>
     <label id="labelLabel">Class for next box <select id="label"><option>generic_crack</option><option>scratch</option></select></label>
+    <small id="drawingHelp">Drag corners around the mark. Cyan boxes are cracks; yellow boxes are scratches.</small>
     <ol id="boxes"></ol>
     <button id="showProposals" type="button" hidden>Inspect training proposals</button>
     <ol id="proposals" hidden></ol>
@@ -45,6 +46,7 @@ small { color: #bbb; }
     <label for="note">Evidence or review note</label>
     <textarea id="note"></textarea>
     <button id="save" type="button">Save annotation</button>
+    <button id="saveNext" type="button">Save and next unlabelled</button>
     <button id="approve" type="button">Approve</button>
     <button id="revise" type="button">Request revision</button>
   </aside>
@@ -53,7 +55,7 @@ small { color: #bbb; }
 const offline = window.practiceOffline;
 const get = id => document.getElementById(id);
 const queue = get('queue'), mode = get('mode'), canvas = get('photo'), ctx = canvas.getContext('2d');
-let row, image, boxes = [], proposals = [], drag = null;
+let row, image, boxes = [], proposals = [], drag = null, loadedMode = 'annotate', dirty = false, saving = false;
 const report = message => { get('status').textContent = message; };
 async function api(path, data) {
   if (offline) return offline.api(path, data);
@@ -63,22 +65,32 @@ async function api(path, data) {
   if (!response.ok) throw new Error(result.error);
   return result;
 }
-async function refresh(id) {
+async function refresh(id, advance = false) {
   const list = await api('/records');
   queue.replaceChildren(...list.map(r => new Option(
     r.id + ' · ' + (r.review?.decision || (r.annotated ? 'needs review' : 'unlabelled')) + ' · ' + (r.practice ? 'practice only' : r.split), r.id
   )));
   if (offline) get('practiceProgress').textContent =
     offline.queue + ' · ' + offline.recordedCount() + ' of ' + list.length + ' saved · practice only';
-  if (id) queue.value = id;
+  let next = null;
+  if (advance) {
+    const current = list.findIndex(r => r.id === id);
+    next = list.slice(current + 1).concat(list.slice(0, current + 1)).find(r => !r.annotated);
+  }
+  if (id) queue.value = next?.id || id;
   if (queue.value) await load();
   else report('Register photos with dataset.py first.');
+  return Boolean(next);
 }
 async function load() {
   const id = queue.value;
+  const nextMode = mode.value;
   const record = await api('/record/' + id);
-  if (queue.value !== id) return;
+  if (queue.value !== id || mode.value !== nextMode) return;
   row = record;
+  loadedMode = nextMode;
+  dirty = false;
+  drag = null;
   if (row.practice_only) mode.querySelector('option[value="review"]')?.remove();
   proposals = [];
   image = new Image();
@@ -100,8 +112,10 @@ function renderPanels() {
     const add = document.createElement('button');
     add.textContent = 'Add to draft';
     add.onclick = () => {
+      if (saving) return;
       const {label, xyxy} = proposal;
       boxes.push({label, xyxy});
+      dirty = true;
       proposals.splice(index, 1);
       get('kind').value = 'positive';
       renderPanels();
@@ -109,7 +123,7 @@ function renderPanels() {
     li.append(add);
     return li;
   })));
-  for (const id of ['save', 'kindLabel', 'labelLabel']) get(id).hidden = review;
+  for (const id of ['save', 'saveNext', 'kindLabel', 'labelLabel', 'drawingHelp']) get(id).hidden = review;
   for (const id of ['approve', 'revise']) {
     get(id).hidden = !review;
     get(id).disabled = !row?.annotation;
@@ -123,7 +137,7 @@ function renderPanels() {
     if (!review) {
       const button = document.createElement('button');
       button.textContent = 'Remove';
-      button.onclick = () => { boxes.splice(i, 1); renderPanels(); };
+      button.onclick = () => { if (!saving) { boxes.splice(i, 1); dirty = true; renderPanels(); } };
       li.append(button);
     }
     return li;
@@ -158,7 +172,7 @@ function point(e) {
           Math.max(0, Math.min(row.height, Math.round((e.clientY - rect.top) * row.height / rect.height)))];
 }
 canvas.onpointerdown = e => {
-  if (!row || !image?.complete || mode.value !== 'annotate' || get('kind').value !== 'positive') return;
+  if (saving || !row || queue.value !== row.id || !image?.complete || mode.value !== 'annotate' || get('kind').value !== 'positive') return;
   canvas.setPointerCapture(e.pointerId);
   drag = {start: point(e), end: point(e)};
 };
@@ -167,28 +181,62 @@ canvas.onpointercancel = () => { drag = null; draw(); };
 canvas.onpointerup = e => {
   if (!drag) return;
   const [a,b] = drag.start, [c,d] = point(e);
-  if (a !== c && b !== d) boxes.push({label: get('label').value, xyxy: [Math.min(a,c), Math.min(b,d), Math.max(a,c), Math.max(b,d)]});
+  if (a !== c && b !== d) {
+    boxes.push({label: get('label').value, xyxy: [Math.min(a,c), Math.min(b,d), Math.max(a,c), Math.max(b,d)]});
+    dirty = true;
+  }
   drag = null;
   renderPanels();
 };
-async function submit(action, decision) {
-  if (!row) return;
+async function submit(action, decision, advance = false) {
+  if (saving || !row || queue.value !== row.id || loadedMode !== mode.value) return;
   const kind = get('kind').value;
   if (action === 'annotate' && kind !== 'positive' && boxes.length) {
     report('Remove damage boxes before marking a photo clean or excluded.');
     return;
   }
+  const controls = ['save', 'saveNext', 'approve', 'revise', 'queue', 'mode', 'kind', 'note', 'importLabels'];
+  const priorDisabled = controls.map(id => get(id).disabled);
+  controls.forEach(id => { get(id).disabled = true; });
+  saving = true;
   try {
     await api('/' + action + '/' + row.id, {revision: row.revision, actor: get('actor').value, kind, boxes, note: get('note').value, decision});
-    await refresh(row.id);
-    report(offline ? offline.saveStatus() : 'Saved.');
+    dirty = false;
+    const moved = await refresh(row.id, advance);
+    const saved = offline ? offline.saveStatus() : 'Saved.';
+    report(advance && !moved ? saved + ' No unlabelled images remain.' : saved);
   } catch (error) { report(error.message); }
+  finally {
+    saving = false;
+    controls.forEach((id, i) => { get(id).disabled = priorDisabled[i]; });
+    renderPanels();
+  }
 }
-queue.onchange = () => load().catch(e => report(e.message));
-mode.onchange = () => { proposals = []; renderPanels(); queue.onchange(); };
+function changeView() {
+  if (dirty && !window.confirm('Discard the unsaved changes on this image?')) {
+    queue.value = row.id;
+    mode.value = loadedMode;
+    return;
+  }
+  drag = null;
+  proposals = [];
+  renderPanels();
+  load().catch(e => report(e.message));
+}
+queue.onchange = changeView;
+mode.onchange = changeView;
+get('kind').onchange = () => { dirty = true; };
+get('note').oninput = () => { dirty = true; };
+window.addEventListener('beforeunload', e => {
+  if (dirty) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 get('zoom').onchange = size;
 window.onresize = size;
 get('showProposals').onclick = async () => {
+  if (saving) return;
   const id = row.id;
   try {
     const boxes = await api('/proposal/' + id);
@@ -200,18 +248,24 @@ get('showProposals').onclick = async () => {
   } catch (error) { report(error.message); }
 };
 get('save').onclick = () => submit('annotate');
+get('saveNext').onclick = () => submit('annotate', null, true);
 get('approve').onclick = () => submit('review', 'approved');
 get('revise').onclick = () => submit('review', 'revise');
 if (offline) {
   get('offlineTools').hidden = false;
   mode.querySelector('option[value="review"]').remove();
   get('downloadLabels').onclick = () => {
+    if (dirty) return report('Save this draft before downloading it, or discard the changes.');
     try { report('Downloaded ' + offline.download() + ' saved annotation(s).'); }
     catch (error) { report(error.message); }
   };
   get('importLabels').onchange = async e => {
     const file = e.target.files[0];
     if (!file) return;
+    if (dirty) {
+      e.target.value = '';
+      return report('Save or discard the current draft before importing a backup.');
+    }
     try {
       const count = await offline.import(file);
       await refresh(queue.value);

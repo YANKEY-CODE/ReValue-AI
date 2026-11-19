@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 
 from dataset import audit, export, prepare_practice, practice_ids, read_json, register, review_queue, update_record, write_json
 from evaluate import BUNDLED_SHA, frozen_test, match
-from propose import proposal_for
+from propose import proposal_for, proposal_plan
 
 
 class BenchmarkTests(unittest.TestCase):
@@ -106,6 +106,20 @@ class BenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "training image"):
             proposal_for(self.root, row["id"])
         self.assertTrue(any("model-assisted" in item for item in audit(self.root)[0]["split_blockers"]))
+
+    def test_proposal_plan_blocks_protected_device_and_exact_duplicate(self):
+        a = self.record("same-image-a")
+        b = self.record("same-image-b")
+        self.approved(a, "train", "phone-1", "session-1")
+        self.approved(b, "test", "phone-1", "session-2")
+        plan = proposal_plan(self.root)
+        self.assertEqual(plan["eligible_ids"], [])
+        self.assertIn("Shares device", plan["blocked"][a.stem])
+        row = read_json(b)
+        write_json(b, {**row, "device": "phone-2"})
+        plan = proposal_plan(self.root)
+        self.assertEqual(plan["eligible_ids"], [])
+        self.assertIn("exact duplicate", plan["blocked"][a.stem])
 
     def test_editing_saved_approval_and_clearing_manifest_blockers_cannot_unlock_benchmark(self):
         path = self.record("damage")

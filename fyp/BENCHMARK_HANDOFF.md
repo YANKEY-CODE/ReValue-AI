@@ -68,8 +68,11 @@ python fyp/benchmark/dataset.py --root "$BENCHMARK" queue > "$BENCHMARK/next-act
 Optional proposals are limited to authorized photos already assigned to **training**, with known device and session. With the annotator stopped, run the following using an ID from your private catalogue:
 
 ```bash
-python fyp/benchmark/propose.py --root "$BENCHMARK" <TRAIN_IMAGE_ID>
+python fyp/benchmark/propose.py --root "$BENCHMARK" --plan
+python fyp/benchmark/propose.py --root "$BENCHMARK" --all-training
 ```
+
+The preflight blocks training candidates that share a phone/session or unresolved duplicate with practice, validation, or test. It skips blocked rows in batch mode and loads no detector if nothing qualifies. For a smaller run, pass only image IDs from the eligible list.
 
 In Annotate mode, inspect the full photo first, then optionally choose **Inspect training proposals**. Add individual boxes to the draft only after checking the pixels, and draw any missed marks. The detector cannot submit a label, approve it, or mark an image clean. Proposal boxes and scores are hidden in Review mode. Proposal generation writes private sidecars and marks the source photos as model-assisted. The audit blocks them, matched duplicates and known phone/session relatives from validation and test. Do not generate proposals for blind practice or held-out candidates.
 
@@ -85,11 +88,13 @@ python fyp/benchmark/dataset.py --root "$BENCHMARK" export "$BENCHMARK/frozen-v1
 
 Export writes a private JSON split manifest with provenance, normalized images and YOLO labels, and explicit empty labels for approved negatives. It accepts only approved, selected rows that pass split checks. It can freeze a small development subset, but the evaluator refuses a snapshot whose test set fails the collection minimum. The JSON state includes source attribution and reviewer notes, so keep it private too.
 
-Once all test blockers are clear, run the experimental evaluation:
+Once all test blockers are clear, use the same frozen dataset and candidate checkpoint with `--check-only` to verify them without model inference. Then run the experimental evaluation:
 
 ```bash
 export YOLO_CONFIG_DIR="$PWD/.revalue-runtime/yolo" MPLCONFIGDIR="$PWD/.revalue-runtime/matplotlib"
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 YOLO_AUTOINSTALL=false
+python fyp/benchmark/evaluate.py --dataset "$BENCHMARK/frozen-v1" \
+  --houdan /workspace/scratch/revalue-houdan-v1/best.pt --check-only
 for SIZE in 640 960; do
   python fyp/benchmark/evaluate.py \
     --dataset "$BENCHMARK/frozen-v1" --imgsz "$SIZE" \
@@ -106,7 +111,7 @@ Run software verification with `python fyp/benchmark/test_benchmark.py`. The [ex
 
 ## Offline label exchange
 
-Download the HTML package for your assigned role to a personal browser. It includes your queue's ten cropped photos with CC BY 4.0 attribution. Save each annotation and use **Download my labels** to create a backup. Use **Import saved labels** to resume from a backup or move browsers. Use separate packages and browser profiles for the two people. Do not open the other package before finishing. The files contain private practice work and belong outside Git.
+Download the HTML package for your assigned role to a personal browser. It includes your queue's ten cropped photos with CC BY 4.0 attribution. In v3, use **Save and next unlabelled** to keep moving through the queue. You can also use **Save annotation** to stay on the current image. A failed validation keeps you on the same image. Switching images with a changed draft asks before discarding it. Use **Download my labels** to create a backup. If you already started in v2, download its JSON and use **Import saved labels** in v3. Use **Import saved labels** to resume from a backup or move browsers. Use separate packages and browser profiles for the two people. Do not open the other package before finishing. The files contain private practice work and belong outside Git.
 
 From the repository root, prepare fresh files or import completed submissions while the annotator is stopped:
 
@@ -117,6 +122,17 @@ python fyp/benchmark/practice.py --root "$BENCHMARK" import /private/revalue-pra
 python fyp/benchmark/practice.py --root "$BENCHMARK" import /private/revalue-practice-b-labels.json
 python fyp/benchmark/practice.py --root "$BENCHMARK" compare "$BENCHMARK/practice-review.md"
 ```
+
+To check the two downloaded files and compare them without importing labels into either workspace:
+
+```bash
+python fyp/benchmark/practice.py --root "$BENCHMARK" validate /private/revalue-practice-a-labels.json "$BENCHMARK/a-check.json"
+python fyp/benchmark/practice.py --root "$BENCHMARK" validate /private/revalue-practice-b-labels.json "$BENCHMARK/b-check.json"
+python fyp/benchmark/practice.py --root "$BENCHMARK" compare-files \
+  /private/revalue-practice-a-labels.json /private/revalue-practice-b-labels.json "$BENCHMARK/practice-review.md"
+```
+
+The validation reports distinguish missing IDs from invalid IDs and identify repeated rows, changed image hashes, invalid boxes and inconsistent annotator IDs. These commands return a nonzero exit for incomplete or invalid submissions and still write the available diagnostics. A comparison with complete, distinct submissions can report disagreements without changing either person's labels.
 
 The report matches boxes one to one by overlap and identifies missed, extra, differently named and poorly aligned boxes, plus differences in clean/positive/excluded decisions. An overlapping pair with the same class counts as a match at IoU ≥ 0.50. Use this report as an agenda for human calibration. Distinct IDs are a consistency check, not proof of authorship. A conflict with existing saved work halts import instead of overwriting it.
 

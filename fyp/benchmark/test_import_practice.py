@@ -9,7 +9,7 @@ from PIL import Image
 
 from dataset import audit, prepare_practice, read_json, register, write_json
 from import_dataset import coco_entries, import_references, voc_entries, yolo_entries
-from practice import compare, import_submission, package, queue_records
+from practice import compare, import_submission, inspect_submission, package, queue_records
 
 
 class ImportAndPracticeTests(unittest.TestCase):
@@ -119,6 +119,35 @@ class ImportAndPracticeTests(unittest.TestCase):
         for role in ("annotator-a", "annotator-b"):
             _, rows = queue_records(self.destination, role)
             self.assertIsNone(rows[ident]["review"])
+
+    def test_saved_files_can_be_compared_without_import_and_can_report_bad_rows(self):
+        for index in range(10):
+            register(self.destination, self.image, "fixture", str(index), "fixture", "fixture", "front")
+        prepare_practice(self.destination)
+        _, records_a = queue_records(self.destination, "annotator-a")
+        ident, row = next(iter(records_a.items()))
+        left = self.root / "a.json"
+        right = self.root / "b.json"
+
+        def item(actor, kind, checksum=row["image_sha256"]):
+            return {"id": ident, "image_sha256": checksum, "annotation": {
+                "actor": actor, "kind": kind, "boxes": [], "note": "fixture"
+            }}
+
+        write_json(left, {"queue": "annotator-a", "rows": [item("left", "clean")]})
+        write_json(right, {"queue": "annotator-b", "rows": [item("right", "exclude")]})
+        result = compare(self.destination, (left, right))
+        self.assertEqual(result["counts"], {"disagree": 1, "pending_both": 9})
+        self.assertEqual(len(result["submission_checks"][0]["missing_ids"]), 9)
+        self.assertIsNone(queue_records(self.destination, "annotator-a")[1][ident]["annotation"])
+
+        write_json(left, {"queue": "annotator-a", "rows": [item("left", "clean"), item("left", "clean")]})
+        check, valid = inspect_submission(self.destination, left)
+        self.assertEqual(check["invalid_ids"], [ident])
+        self.assertEqual(valid, {})
+        self.assertIn("Repeated", check["issues"][0])
+        with self.assertRaisesRegex(ValueError, "Expected the annotator-a"):
+            compare(self.destination, (right, left))
 
 
 if __name__ == "__main__":

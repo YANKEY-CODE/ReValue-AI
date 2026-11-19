@@ -45,34 +45,65 @@ def private_file(path, flags):
     return os.open(path, flags, 0o600)
 
 
-def import_submission(root, source):
+def inspect_submission(root, source, expected_role=None):
+    """Check an offline file against its roster without writing workspace records."""
     if source.stat().st_size > 500_000:
         raise ValueError("Expected a small annotation JSON file.")
     payload = read_json(source)
+    if not isinstance(payload, dict) or payload.get("queue") not in ROLES or not isinstance(payload.get("rows"), list):
+        raise ValueError("Expected an offline JSON object with a known queue and rows list.")
     role = payload["queue"]
-    if role not in ROLES:
-        raise ValueError("Unknown practice queue.")
+    if expected_role and role != expected_role:
+        raise ValueError(f"Expected the {expected_role} file, found {role}.")
+    _, roster = queue_records(root, role)
+    issues, seen, valid = [], set(), {}
+    for index, item in enumerate(payload["rows"], 1):
+        try:
+            if not isinstance(item, dict):
+                raise ValueError("Expected an annotation row object.")
+            ident = key(item.get("id"))
+            if ident in seen:
+                valid.pop(ident, None)
+                raise ValueError(f"Repeated practice image {ident}.")
+            seen.add(ident)
+            row = roster.get(ident)
+            if not row or item.get("image_sha256") != row["image_sha256"]:
+                raise ValueError(f"Unknown or changed practice image {ident}.")
+            if not isinstance(item.get("annotation"), dict):
+                raise ValueError(f"Missing annotation object for {ident}.")
+            valid[ident] = validate_annotation(row, item["annotation"])
+        except ValueError as exc:
+            issues.append(f"Row {index}: {exc}")
+    actors = sorted({row["actor"].casefold() for row in valid.values()})
+    if len(actors) > 1:
+        issues.append("Use one distinct human annotator ID per practice queue.")
+    return {
+        "queue": role, "expected": len(roster), "valid": len(valid),
+        "missing_ids": sorted(set(roster) - seen),
+        "invalid_ids": sorted((set(roster) & seen) - set(valid)),
+        "actor_ids": actors, "issues": issues,
+    }, valid
+
+
+def import_submission(root, source):
+    check, annotations = inspect_submission(root, source)
+    if check["issues"]:
+        raise ValueError(" ".join(check["issues"]))
+    role = check["queue"]
     queue, rows = queue_records(root, role)
     other_role = next(name for name in ROLES if name != role)
     _, other = queue_records(root, other_role)
     peer_ids = {r["annotation"]["actor"].casefold() for r in other.values() if r["annotation"]}
     participant = {r["annotation"]["actor"].casefold() for r in rows.values() if r["annotation"]}
-    pending = {}
-    for item in payload["rows"]:
-        ident = key(item["id"])
-        if ident in pending or ident not in rows or item["image_sha256"] != rows[ident]["image_sha256"]:
-            raise ValueError("Unknown, repeated or changed practice image.")
-        row = rows[ident]
-        annotation = validate_annotation(row, item["annotation"])
-        participant.add(annotation["actor"].casefold())
-        if row["annotation"] and row["annotation"] != annotation:
-            raise ValueError(f"Conflicting saved annotation on {ident}; the workspace was not changed.")
-        pending[ident] = {**row, "annotation": annotation, "review": None}
-    if not pending or len(participant) != 1 or participant & peer_ids:
+    participant.update(check["actor_ids"])
+    if not annotations or len(participant) != 1 or participant & peer_ids:
         raise ValueError("Use one distinct human annotator ID per practice queue.")
-    for ident, row in pending.items():
-        write_json(queue / "records" / f"{ident}.json", row)
-    return len(pending)
+    for ident, annotation in annotations.items():
+        if rows[ident]["annotation"] and rows[ident]["annotation"] != annotation:
+            raise ValueError(f"Conflicting saved annotation on {ident}; the workspace was not changed.")
+    for ident, annotation in annotations.items():
+        write_json(queue / "records" / f"{ident}.json", {**rows[ident], "annotation": annotation, "review": None})
+    return len(annotations)
 
 
 def iou(a, b):
@@ -102,8 +133,15 @@ def box_differences(a, b):
     return report
 
 
-def compare(root):
+def compare(root, submissions=None):
     a, b = [queue_records(root, role)[1] for role in ROLES]
+    checks = []
+    if submissions is not None:
+        for role, source, roster in zip(ROLES, submissions, (a, b), strict=True):
+            check, labels = inspect_submission(root, source, expected_role=role)
+            checks.append(check)
+            for ident, row in roster.items():
+                row["annotation"] = labels.get(ident)
     result, counts = [], Counter()
     actors = [{row["annotation"]["actor"].casefold() for row in queue.values() if row["annotation"]} for queue in (a, b)]
     independent_ids = all(len(team) == 1 for team in actors) and not actors[0] & actors[1]
@@ -124,12 +162,19 @@ def compare(root):
         result.append({"id": ident, "status": status, "a": one, "b": two, "box_comparison": differences})
     return {"counts": dict(counts), "distinct_annotator_ids": bool(independent_ids),
             "note": "Human practice comparison only. Review disagreements together; nothing was approved.",
-            "images": result}
+            "images": result, "submission_checks": checks}
 
 def comparison_markdown(result):
     lines = ["# Private practice disagreement report", "", result["note"], ""]
     lines.append("Queue status: " + ", ".join(f"{name.replace('_', ' ')}: {count}" for name, count in result["counts"].items()))
     lines.append("Distinct IDs in both queues: " + ("yes" if result["distinct_annotator_ids"] else "not confirmed"))
+    for check in result["submission_checks"]:
+        lines.append(f"{check['queue']}: {check['valid']} / {check['expected']} valid records.")
+        if check["missing_ids"]:
+            lines.append("Missing IDs: " + ", ".join(check["missing_ids"]))
+        if check["invalid_ids"]:
+            lines.append("Invalid IDs: " + ", ".join(check["invalid_ids"]))
+        lines.extend(f"- {escape(issue)}" for issue in check["issues"])
     lines.append("")
     for image in result["images"]:
         lines.append(f"## {image['id']} · {image['status'].replace('_', ' ')}")
@@ -158,6 +203,12 @@ if __name__ == "__main__":
     make.add_argument("output", type=Path)
     commands.add_parser("import").add_argument("source", type=Path)
     commands.add_parser("compare").add_argument("output", type=Path)
+    validate = commands.add_parser("validate")
+    validate.add_argument("source", type=Path)
+    validate.add_argument("output", type=Path)
+    files = commands.add_parser("compare-files")
+    for field in ("annotator_a", "annotator_b", "output"):
+        files.add_argument(field, type=Path)
     args = parser.parse_args()
     try:
         root = private_path(args.root)
@@ -165,13 +216,23 @@ if __name__ == "__main__":
             package(root, args.role, private_path(args.output))
         elif args.command == "import":
             print(f"Imported {import_submission(root, private_path(args.source))} human practice annotations.")
+        elif args.command == "validate":
+            check, _ = inspect_submission(root, private_path(args.source))
+            write_json(private_path(args.output), check)
+            print(f"{check['valid']} / {check['expected']} valid; {len(check['issues'])} issue(s).")
+            if check["issues"] or check["missing_ids"]:
+                raise SystemExit(1)
         else:
-            result = compare(root)
+            files = (private_path(args.annotator_a), private_path(args.annotator_b)) if args.command == "compare-files" else None
+            result = compare(root, files)
             output = private_path(args.output)
             if output.suffix == ".md":
                 output.write_text(comparison_markdown(result), encoding="utf-8")
             else:
                 write_json(output, result)
             print(json.dumps(result["counts"]))
+            if files and (not result["distinct_annotator_ids"] or not result["counts"].keys() <= {"agree", "disagree"}
+                          or any(check["issues"] for check in result["submission_checks"])):
+                raise SystemExit(1)
     except (ValueError, KeyError, TypeError, OSError) as exc:
         parser.error(str(exc))

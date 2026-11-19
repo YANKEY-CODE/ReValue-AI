@@ -229,10 +229,21 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=Path, required=True, help="Frozen dataset export directory")
     parser.add_argument("--imgsz", type=int, choices=(640, 960), default=640)
     parser.add_argument("--houdan", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--check-only", action="store_true", help="Validate frozen data and checkpoint hashes without inference")
     args = parser.parse_args()
     os.environ.setdefault("YOLO_AUTOINSTALL", "false")
     try:
-        evaluate(private_path(args.dataset), private_path(args.output), args.houdan, args.imgsz)
-    except (ValueError, OSError) as exc:
+        dataset = private_path(args.dataset)
+        if args.check_only:
+            rows = frozen_test(dataset)
+            bundled = REPO / "backend/models/revalue_exterior_yolo11n_v0.2.pt"
+            if digest(bundled) != BUNDLED_SHA or digest(args.houdan) != HOUDAN_SHA:
+                raise ValueError("A checkpoint does not match its pinned SHA-256.")
+            print(f"Preflight passed for {len(rows)} test images and both checkpoints. No inference was run.")
+        elif args.output:
+            evaluate(dataset, private_path(args.output), args.houdan, args.imgsz)
+        else:
+            parser.error("--output is required for evaluation runs.")
+    except (ValueError, KeyError, TypeError, OSError) as exc:
         parser.error(str(exc))
