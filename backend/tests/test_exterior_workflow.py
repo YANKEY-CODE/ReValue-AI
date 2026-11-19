@@ -19,6 +19,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from backend.src.device_identification import identify_device
 from backend.src.exterior_analysis import analyze_exterior
 from backend.src.exterior_verification import verify_damage_with_gemini
 from backend.src.gemini_client import GeminiTemporaryUnavailable
@@ -64,6 +65,26 @@ class ExteriorTests(unittest.TestCase):
                 status, result = self.request("/analyze-exterior", body)
                 self.assertEqual(status, 400)
                 self.assertEqual(result.get("grade", {}).get("exterior_grade", "pending"), "pending")
+
+    def test_identification_rejects_invalid_upload_before_provider(self):
+        with patch("backend.src.server.identify_device") as identification:
+            for payload in ({"images": ["wrong"]}, {"images": [photo("unrecognized")]},
+                            {"images": [photo("front") | {"bytes_b64": "!!!"}]}):
+                status, result = self.request("/identify-device", payload)
+                self.assertEqual((status, result["status"]), (400, "error"))
+            identification.assert_not_called()
+
+    def test_identification_does_not_invent_candidates_on_invalid_provider_reply(self):
+        class MalformedClient:
+            model = "test-provider"
+
+            def generate_structured(self, **kwargs):
+                return {"top_candidates": [{"model": ["wrong"], "visual_evidence": [None]}]}
+
+        result = identify_device([ImageInput(**photo("front"))], client=MalformedClient())
+        self.assertEqual(result.status, "error")
+        self.assertTrue(result.requires_user_confirmation)
+        self.assertEqual(result.candidates, [])
 
     def test_model_failure_leaves_grade_pending(self):
         with patch("backend.src.exterior_analysis.detect_exterior_damage", side_effect=YoloDetectorUnavailable("load failed")):

@@ -73,6 +73,11 @@ def identify_device(
             requires_user_confirmation=True,
         )
 
+    except (RuntimeError, ValueError):
+        return _invalid_provider_response(client)
+
+    if not isinstance(response, dict) or not isinstance(response.get("top_candidates"), list):
+        return _invalid_provider_response(client)
     candidates = [
         DeviceCandidate(
             brand=item.get("brand") or response.get("brand") or "Unknown",
@@ -80,12 +85,29 @@ def identify_device(
             confidence_label=item.get("confidence_label", "uncertain"),
             visual_evidence=item.get("visual_evidence", []),
         )
-        for item in response.get("top_candidates", [])[:3]
+        for item in response["top_candidates"][:3]
+        if isinstance(item, dict) and isinstance(item.get("model"), str) and item["model"].strip()
+        and isinstance(item.get("brand") or response.get("brand") or "Unknown", str)
+        and item.get("confidence_label", "uncertain") in ("likely", "possible", "uncertain")
+        and isinstance(item.get("visual_evidence", []), list)
+        and all(isinstance(detail, str) for detail in item.get("visual_evidence", []))
     ]
+    if response["top_candidates"] and not candidates:
+        return _invalid_provider_response(client)
     return DeviceIdentificationResult(
         status="ok",
         gemini_model=client.model,
         top_candidates=candidates,
         candidates=normalize_gemini_candidates(candidates),
+        requires_user_confirmation=True,
+    )
+
+
+def _invalid_provider_response(client: GeminiClient) -> DeviceIdentificationResult:
+    return DeviceIdentificationResult(
+        status="error",
+        gemini_model=client.model,
+        error="AI identification returned no usable response. Select the device manually or try again.",
+        stage="device_identification",
         requires_user_confirmation=True,
     )

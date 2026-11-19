@@ -27,8 +27,11 @@ Run the automated checks and start the server from the repository root:
 set -e
 for test in backend/tests/*.py; do REVALUE_TEST_REAL_MODEL=1 python "$test"; done
 python fyp/test_evaluate_detection.py
+for test in fyp/benchmark/test_*.py; do python "$test"; done
 python -m backend.src.server
 ```
+
+With the server running and Playwright plus Chromium installed, run `node fyp/browser_smoke.cjs` to check review gating, insufficient-evidence pricing and report IDs. Set `CHROMIUM_PATH` to use a system Chromium.
 
 Open `http://127.0.0.1:8765` and confirm `/health` returns `{"status":"ok", ...}`. Choose **Value Another Phone**, search the catalogue, confirm storage, attach front, back, camera, left and right photos, then choose **Analyze Exterior**. Test replacing a photo after analysis. The previous grade and valuation should be cleared. To check QR capture across two devices, run on a trusted network and open the app via a host address reachable from both. The localhost address is only reachable from the server machine. Use consented test photos. Uploads accept JPEG, PNG and WebP up to 8 MiB and 16 megapixels each.
 
@@ -41,6 +44,8 @@ The default detector is the bundled YOLO11n. For trusted compatible YOLO weights
 The bundled report records 173 held-out images and 414 annotations, with overall precision 0.495, recall 0.486, mAP@50 0.426 and mAP@50–95 0.181. It reports crack precision 0.369 and recall 0.230, and scratch precision 0.621 and recall 0.743. These figures are historical and have not been independently rerun. The source is [MODEL_EVALUATION_v0.2.txt](../backend/models/MODEL_EVALUATION_v0.2.txt).
 
 ## Run a held-out detection comparison
+
+For the real-image ReValue–Houdan benchmark, start with the [private annotation and review workflow](BENCHMARK_HANDOFF.md). It freezes a verified holdout before comparisons.
 
 Prepare a permitted dataset outside the checkout with local image directories in its YAML. Use a path relative to the YAML or an absolute path. Each image belongs under an `images/` directory with a matching YOLO box label under `labels/`. Use an explicit empty label file for each reviewed clean negative.
 

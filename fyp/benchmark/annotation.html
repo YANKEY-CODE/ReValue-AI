@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReValue benchmark annotation</title>
+<style>
+:root { color-scheme: dark; font: 16px system-ui; }
+body { margin: 1.5rem auto; max-width: 1120px; padding: 0 1rem; }
+header, .toolbar { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(250px, 1fr); gap: 1rem; margin-top: 1rem; }
+#imageArea { overflow: auto; max-height: 75vh; background: #141414; }
+canvas { display: block; touch-action: none; max-width: none; }
+aside { display: grid; gap: .6rem; align-content: start; }
+input, select, button, textarea { font: inherit; padding: .4rem; }
+textarea { min-height: 5rem; }
+#status { min-height: 1.6rem; color: #ffe28c; }
+small { color: #bbb; }
+@media (max-width: 720px) { main { grid-template-columns: 1fr; } }
+</style>
+<h1>Phone damage annotation</h1>
+<header>
+  <label>Reviewer or annotator ID <input id="actor" autocomplete="off" maxlength="64"></label>
+  <label>Mode <select id="mode"><option value="annotate">Annotate</option><option value="review">Review</option></select></label>
+  <label>Image <select id="queue"></select></label>
+</header>
+<div id="offlineTools" hidden>
+  <p id="practiceProgress"></p>
+  <button type="button" id="downloadLabels">Download my labels</button>
+  <label>Import saved labels <input type="file" id="importLabels" accept=".json,application/json"></label>
+</div>
+<p id="status" role="status"></p>
+<main>
+  <section>
+    <div class="toolbar"><label>Zoom <select id="zoom"><option value="0">Fit width</option><option value=".5">50%</option><option value="1">100%</option><option value="2">200%</option></select></label></div>
+    <div id="imageArea"><canvas id="photo" aria-label="Phone photo with drawn damage boxes"></canvas></div>
+  </section>
+  <aside>
+    <small id="source"></small>
+    <label id="kindLabel">Image disposition <select id="kind"><option value="positive">Damage boxes</option><option value="clean">Verified clean</option><option value="exclude">Exclude</option></select></label>
+    <label id="labelLabel">Class for next box <select id="label"><option>generic_crack</option><option>scratch</option></select></label>
+    <ol id="boxes"></ol>
+    <button id="showProposals" type="button" hidden>Inspect training proposals</button>
+    <ol id="proposals" hidden></ol>
+    <p id="prior"></p>
+    <label for="note">Evidence or review note</label>
+    <textarea id="note"></textarea>
+    <button id="save" type="button">Save annotation</button>
+    <button id="approve" type="button">Approve</button>
+    <button id="revise" type="button">Request revision</button>
+  </aside>
+</main>
+<script>
+const offline = window.practiceOffline;
+const get = id => document.getElementById(id);
+const queue = get('queue'), mode = get('mode'), canvas = get('photo'), ctx = canvas.getContext('2d');
+let row, image, boxes = [], proposals = [], drag = null;
+const report = message => { get('status').textContent = message; };
+async function api(path, data) {
+  if (offline) return offline.api(path, data);
+  const init = data ? {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)} : {};
+  const response = await fetch(path, init);
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error);
+  return result;
+}
+async function refresh(id) {
+  const list = await api('/records');
+  queue.replaceChildren(...list.map(r => new Option(
+    r.id + ' · ' + (r.review?.decision || (r.annotated ? 'needs review' : 'unlabelled')) + ' · ' + (r.practice ? 'practice only' : r.split), r.id
+  )));
+  if (offline) get('practiceProgress').textContent =
+    offline.queue + ' · ' + offline.recordedCount() + ' of ' + list.length + ' saved · practice only';
+  if (id) queue.value = id;
+  if (queue.value) await load();
+  else report('Register photos with dataset.py first.');
+}
+async function load() {
+  const id = queue.value;
+  const record = await api('/record/' + id);
+  if (queue.value !== id) return;
+  row = record;
+  if (row.practice_only) mode.querySelector('option[value="review"]')?.remove();
+  proposals = [];
+  image = new Image();
+  image.onload = size;
+  image.src = offline ? offline.image(id) : '/image/' + id;
+  boxes = structuredClone(row.annotation?.boxes || []);
+  get('source').textContent = [row.view, row.attribution, row.license_terms].join(' · ');
+  get('kind').value = row.annotation?.kind || 'positive';
+  get('note').value = mode.value === 'annotate' ? row.annotation?.note || '' : '';
+  renderPanels();
+}
+function renderPanels() {
+  const review = mode.value === 'review';
+  get('showProposals').hidden = review || !row?.proposal_available;
+  get('proposals').hidden = review || !proposals.length;
+  get('proposals').replaceChildren(...(review ? [] : proposals.map((proposal, index) => {
+    const li = document.createElement('li');
+    li.textContent = proposal.label + ' (model score ' + proposal.confidence + ') ';
+    const add = document.createElement('button');
+    add.textContent = 'Add to draft';
+    add.onclick = () => {
+      const {label, xyxy} = proposal;
+      boxes.push({label, xyxy});
+      proposals.splice(index, 1);
+      get('kind').value = 'positive';
+      renderPanels();
+    };
+    li.append(add);
+    return li;
+  })));
+  for (const id of ['save', 'kindLabel', 'labelLabel']) get(id).hidden = review;
+  for (const id of ['approve', 'revise']) {
+    get(id).hidden = !review;
+    get(id).disabled = !row?.annotation;
+  }
+  get('prior').textContent = review && row?.annotation
+    ? 'Submitted by ' + row.annotation.actor + ' (' + row.annotation.kind + '): ' + row.annotation.note
+    : (row?.review ? 'Reviewer ' + row.review.actor + ': ' + row.review.note : '');
+  const items = boxes.map((box, i) => {
+    const li = document.createElement('li');
+    li.textContent = box.label + ' [' + box.xyxy.join(', ') + '] ';
+    if (!review) {
+      const button = document.createElement('button');
+      button.textContent = 'Remove';
+      button.onclick = () => { boxes.splice(i, 1); renderPanels(); };
+      li.append(button);
+    }
+    return li;
+  });
+  get('boxes').replaceChildren(...items);
+  draw();
+}
+function size() {
+  if (!image?.complete || !image.naturalWidth) return;
+  const scale = Number(get('zoom').value) || Math.min(1, get('imageArea').clientWidth / image.naturalWidth);
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  draw();
+}
+function draw() {
+  if (!image?.complete || !image.naturalWidth || !row) return;
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const visibleProposals = mode.value === 'annotate' ? proposals : [];
+  for (const box of [...visibleProposals, ...boxes, ...(drag ? [{label: get('label').value, xyxy: [...drag.start, ...drag.end]}] : [])]) {
+    const [x1,y1,x2,y2] = box.xyxy;
+    const suggested = visibleProposals.includes(box);
+    ctx.setLineDash(suggested ? [6, 4] : []);
+    ctx.strokeStyle = suggested ? '#ee87ff' : box.label === 'scratch' ? '#f9cf59' : '#49efff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x1 * canvas.width / row.width, y1 * canvas.height / row.height,
+      (x2-x1) * canvas.width / row.width, (y2-y1) * canvas.height / row.height);
+  }
+}
+function point(e) {
+  const rect = canvas.getBoundingClientRect();
+  return [Math.max(0, Math.min(row.width, Math.round((e.clientX - rect.left) * row.width / rect.width))),
+          Math.max(0, Math.min(row.height, Math.round((e.clientY - rect.top) * row.height / rect.height)))];
+}
+canvas.onpointerdown = e => {
+  if (!row || !image?.complete || mode.value !== 'annotate' || get('kind').value !== 'positive') return;
+  canvas.setPointerCapture(e.pointerId);
+  drag = {start: point(e), end: point(e)};
+};
+canvas.onpointermove = e => { if (drag) { drag.end = point(e); draw(); } };
+canvas.onpointercancel = () => { drag = null; draw(); };
+canvas.onpointerup = e => {
+  if (!drag) return;
+  const [a,b] = drag.start, [c,d] = point(e);
+  if (a !== c && b !== d) boxes.push({label: get('label').value, xyxy: [Math.min(a,c), Math.min(b,d), Math.max(a,c), Math.max(b,d)]});
+  drag = null;
+  renderPanels();
+};
+async function submit(action, decision) {
+  if (!row) return;
+  const kind = get('kind').value;
+  if (action === 'annotate' && kind !== 'positive' && boxes.length) {
+    report('Remove damage boxes before marking a photo clean or excluded.');
+    return;
+  }
+  try {
+    await api('/' + action + '/' + row.id, {revision: row.revision, actor: get('actor').value, kind, boxes, note: get('note').value, decision});
+    await refresh(row.id);
+    report(offline ? offline.saveStatus() : 'Saved.');
+  } catch (error) { report(error.message); }
+}
+queue.onchange = () => load().catch(e => report(e.message));
+mode.onchange = () => { proposals = []; renderPanels(); queue.onchange(); };
+get('zoom').onchange = size;
+window.onresize = size;
+get('showProposals').onclick = async () => {
+  const id = row.id;
+  try {
+    const boxes = await api('/proposal/' + id);
+    if (row.id !== id || mode.value !== 'annotate') return;
+    proposals = boxes;
+    renderPanels();
+    report(boxes.length ? 'Dashed boxes are model proposals. Verify against the photo and add only valid boxes to your draft.'
+                        : 'The detector proposed no boxes. Inspect the photo before deciding its disposition.');
+  } catch (error) { report(error.message); }
+};
+get('save').onclick = () => submit('annotate');
+get('approve').onclick = () => submit('review', 'approved');
+get('revise').onclick = () => submit('review', 'revise');
+if (offline) {
+  get('offlineTools').hidden = false;
+  mode.querySelector('option[value="review"]').remove();
+  get('downloadLabels').onclick = () => {
+    try { report('Downloaded ' + offline.download() + ' saved annotation(s).'); }
+    catch (error) { report(error.message); }
+  };
+  get('importLabels').onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const count = await offline.import(file);
+      await refresh(queue.value);
+      report('Restored ' + count + ' annotation(s).');
+    } catch (error) { report(error.message); }
+    finally { e.target.value = ''; }
+  };
+  if (offline.warning) report(offline.warning);
+}
+refresh().catch(e => report(e.message));
+</script>
+</html>

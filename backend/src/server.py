@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from .device_identification import identify_device
 from .exterior_analysis import analyze_exterior
 from .grading_rules import grade_from_atomic_damage
-from .image_upload import decode_image
+from .image_upload import EXTERIOR_VIEWS, decode_image
 from .local_valuation import local_fallback_valuation
 from .market_evidence import exterior_grade_error_response, normalize_exterior_grade, parse_storage_gb, retrieve_current_market_evidence
 from .phone_catalogue import confirm_device, get_catalogue_device, search_catalogue
@@ -35,6 +35,24 @@ REMOTE_VIEW_LABELS = {
     "right_side": "Right Side",
 }
 REMOTE_SESSIONS: dict[str, dict[str, Any]] = {}
+
+
+def _uploaded_images(payload: dict[str, Any]) -> list[ImageInput]:
+    items = payload.get("images")
+    if not isinstance(items, list) or not 1 <= len(items) <= 5:
+        raise ValueError("Expected one to five labelled exterior images.")
+    try:
+        images = [ImageInput(**item) for item in items]
+    except TypeError as exc:
+        raise ValueError("Each image must contain a view and optional image fields.") from exc
+    if any(
+        not isinstance(image.view, str) or image.view not in EXTERIOR_VIEWS
+        or any(value is not None and not isinstance(value, str)
+               for value in (image.filename, image.mime_type, image.bytes_b64))
+        for image in images
+    ):
+        raise ValueError("Use an exterior view label and text image fields.")
+    return images
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -375,7 +393,14 @@ class ReValueHandler(BaseHTTPRequestHandler):
             _json_response(self, 200, _public_session(session, include_images=False))
             return
         if self.path == "/identify-device":
-            images = [ImageInput(**item) for item in payload.get("images", [])]
+            try:
+                images = _uploaded_images(payload)
+                for image in images:
+                    if image.bytes_b64 is not None:
+                        decode_image(image).close()
+            except ValueError as exc:
+                _json_response(self, 400, {"status": "error", "error": str(exc)})
+                return
             _json_response(self, 200, asdict(identify_device(images)))
             return
 
@@ -392,14 +417,9 @@ class ReValueHandler(BaseHTTPRequestHandler):
 
         if self.path == "/analyze-exterior":
             try:
-                items = payload.get("images")
-                if not isinstance(items, list) or len(items) > 5:
-                    raise TypeError("Expected a list of at most five images")
-                images = [ImageInput(**item) for item in items]
-                if any(not isinstance(image.view, str) for image in images):
-                    raise TypeError("Expected string view labels")
-            except TypeError:
-                _json_response(self, 400, {"status": "error", "error": "Expected up to five labelled exterior images."})
+                images = _uploaded_images(payload)
+            except ValueError as exc:
+                _json_response(self, 400, {"status": "error", "error": str(exc)})
                 return
             result = analyze_exterior(images)
             status = {"error": 400, "blocked": 503}.get(result["status"], 200)
