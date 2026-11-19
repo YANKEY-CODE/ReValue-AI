@@ -887,6 +887,15 @@
       0%,100%{opacity:.44}
       50%{opacity:.68}
     }
+
+    #decisionCard[hidden], #qr[hidden] { display:none; }
+    .quote-form { display:grid; gap:12px; margin-top:12px; }
+    .quote-form label { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; justify-content:space-between; }
+    .quote-form input:not([type="checkbox"]), .quote-form select {
+      border:1px solid var(--line); border-radius:8px; padding:.45rem; background:var(--card); color:inherit;
+      max-width:100%; width:10rem;
+    }
+    #decisionResult { margin-top:10px; }
   </style>
 </head>
 <body>
@@ -1058,10 +1067,26 @@
         <div class="value-box"><span data-i18n="estimatedValue">Estimated market value</span><b id="estimatedValue">RM1,150–RM1,450</b></div>
         <div class="value-box"><span data-i18n="repairCost">Repair Cost Reference</span><b id="repairCost">RM249–RM899</b></div>
       </div>
+      <p id="marketBasis" class="helper-line"></p>
       <div class="evidence-stats" id="evidenceStats"></div>
-      <button class="evidence-toggle" type="button" id="priceEvidenceToggle" onclick="togglePriceEvidence()">How is this price estimated?</button>
+      <button class="evidence-toggle" type="button" id="priceEvidenceToggle" aria-controls="priceEvidencePanel" aria-expanded="false" onclick="togglePriceEvidence()">How is this price estimated?</button>
       <div class="price-evidence" id="priceEvidencePanel"></div>
       <div class="recommendation"><i>AI</i><div><span data-i18n="bestRecommendation">BEST NEXT STEP</span><b id="reportReco">Compare Store Offers</b></div></div>
+    </section>
+    <section class="card requires-report" id="decisionCard" hidden>
+      <h3>Compare your options</h3>
+      <p>Enter actual quotes in MYR. Leave amounts blank if you have no quote.</p>
+      <form id="decisionForm" class="quote-form">
+        <label>Goal <select name="goal"><option value="sell">Sell or trade in</option><option value="keep">Keep using</option></select></label>
+        <label>As-is sale offer, after fees <input name="currentOffer" inputmode="decimal"></label>
+        <label>Trade-in credit, after fees <input name="tradeCredit" inputmode="decimal"></label>
+        <label><input name="useCredit" type="checkbox"> I plan to use this credit</label>
+        <label>Total repair quote <input name="repairCost" inputmode="decimal"></label>
+        <label>Post-repair sale offer, after fees <input name="repairedOffer" inputmode="decimal"></label>
+        <button type="submit" class="primary">Compare quotes</button>
+      </form>
+      <p class="helper-line">Figures are based on your quotes. Repair outcome and final offers require confirmation.</p>
+      <div id="decisionResult" aria-live="polite"></div>
     </section>
     <section class="card requires-report">
       <div class="card-title"><h3 data-i18n="scoreBreakdown">Score breakdown</h3><span class="step">EXPLAINABLE</span></div>
@@ -1074,9 +1099,9 @@
       </div>
     </section>
     <section class="card requires-report">
-      <div class="card-title"><h3 data-i18n="reportQr">QR report ID</h3><span class="step">SHOP READY</span></div>
+      <div class="card-title"><h3 id="reportIdentityLabel" data-i18n="reportQr">QR report ID</h3><span id="reportIdentityStep" class="step">DEMO</span></div>
       <div class="qr-panel"><div class="qr" id="qr"></div><div><h3 id="reportId">RVA-13P-C61-0926</h3><p data-i18n="qrExplain">This demo ID represents the phone assessment. A real shop could scan the QR to view the verified report before making an offer.</p><code id="qrState">Exterior C- · Internal B+ · Value RM1,150–RM1,450</code></div></div>
-      <button class="primary" onclick="showPage('shops')" data-i18n="findShop">FIND RECOMMENDED SHOPS</button>
+      <button class="primary" id="reportShopButton" onclick="showPage('shops')" data-i18n="findShop">FIND RECOMMENDED SHOPS</button>
     </section>
   </main>
 
@@ -1385,6 +1410,7 @@ function toast(msg){const el=document.getElementById('toast');el.textContent=msg
 window.handleAndroidBack=()=>{const active=activePageId();if(active==='chatPage'){backFromChat();return true}if(active!=='scanPage'){showPage('scan');return true}return false};
 renderLiveExterior();renderExteriorFindings();renderDiag();updateDiagProgress();renderAssessmentGates();renderChatsList();const bootPage=(location.hash||'').replace('#','');if(['internal','report','shops','chats','chat'].includes(bootPage))showPage(bootPage);
 </script>
+<script src="./decision-support.js"></script>
 <script>
 (function(){
 const legacy={showPage,renderAssessmentGates,updateReport,renderShops,renderChatsList,renderLiveExterior,chooseAssessmentMode,selectDevice};
@@ -1402,7 +1428,7 @@ const dealerBands={
   tradein:{'A':[.78,.82],'B':[.72,.78],'C':[.62,.70],'C-':[.50,.60],D:[.50,.60]},
   cash:{'A':[.74,.80],'B':[.68,.75],'C':[.58,.68],'C-':[.48,.58],D:[.48,.58]}
 };
-const finalState={active:false,target:'',step:'home',query:'',results:[],catalogueDevice:null,confirmedDevice:null,storage:'',photos:{},analysis:null,valuation:null,session:null,poll:null,processing:false,reportId:null,currentAssessment:null};
+const finalState={active:false,target:'',step:'home',query:'',results:[],catalogueDevice:null,confirmedDevice:null,storage:'',photos:{},analysis:null,valuation:null,session:null,poll:null,processing:false,reportId:null,currentAssessment:null,verifyWithGemini:false};
 let activeConversationKey='';
 async function api(path,opts={}){
   const response=await fetch(API_BASE+path,{headers:{'Content-Type':'application/json'},...opts});
@@ -1418,6 +1444,7 @@ function invalidateExterior(){
   finalState.valuation=null;
   finalState.reportId=null;
   finalState.processing=false;
+  evidenceOpen=false;
   exteriorDone=false;
 }
 function resetRemoteCapture(){
@@ -1430,7 +1457,7 @@ function flowBackButton(){return `<button class="flow-back" type="button" onclic
 function syncFlowBackControls(){document.querySelectorAll('.flow-back').forEach(x=>x.remove());const page=activePageId();if(page==='chatPage')return;let show=false;if(page==='scanPage')show=finalState.active&&finalState.step!=='home'||assessmentMode==='demo';else show=['internalPage','reportPage','shopsPage','chatsPage'].includes(page);if(!show)return;const hero=document.querySelector('.screen.active > .hero');if(hero)hero.insertAdjacentHTML('afterbegin',flowBackButton())}
 function showFinalHome(){finalState.active=false;finalState.step='home';assessmentMode='';invalidateExterior();resetRemoteCapture();document.getElementById('scanPage').innerHTML=`<section class="hero scan-hero"><div class="eyebrow">HOME</div><h1>Choose Assessment Mode</h1></section><section class="card tech"><div class="card-title"><h2>Start valuation</h2><span class="step">STEP 1</span></div><div class="final-home-grid"><button class="final-card-button" type="button" onclick="startFinalFlow('self')"><i>THIS</i><b>Value This Phone</b><span>The phone you are using now.</span></button><button class="final-card-button" type="button" onclick="startFinalFlow('other')"><i>OTHER</i><b>Value Another Phone</b><span>A different phone.</span></button></div><button class="ghost-button" type="button" onclick="startDemoMode()">Demo Mode</button></section>`;syncFlowBackControls()}
 window.startDemoMode=function(){finalState.active=false;invalidateExterior();resetRemoteCapture();document.getElementById('scanPage').innerHTML=originalScanHtml;assessmentMode='demo';legacy.chooseAssessmentMode('demo');syncFlowBackControls()}
-window.startFinalFlow=function(target){finalState.active=true;finalState.target=target;finalState.step='model';assessmentMode='live';invalidateExterior();resetRemoteCapture();internalDone=false;finalState.catalogueDevice=null;finalState.confirmedDevice=null;finalState.storage='';finalState.photos={};finalState.analysis=null;finalState.valuation=null;showPage('scan')}
+window.startFinalFlow=function(target){finalState.verifyWithGemini=false;finalState.active=true;finalState.target=target;finalState.step='model';assessmentMode='live';invalidateExterior();resetRemoteCapture();internalDone=false;finalState.catalogueDevice=null;finalState.confirmedDevice=null;finalState.storage='';finalState.photos={};finalState.analysis=null;finalState.valuation=null;showPage('scan')}
 function renderModelSelection(){document.getElementById('scanPage').innerHTML=`<section class="hero scan-hero"><div class="eyebrow">STEP 1</div><h1>Which phone are you valuing?</h1><p>Search for your phone by brand or model.</p></section><section class="card tech"><div class="search-box"><input class="search-input" id="modelSearch" placeholder="Search brand or model" value="${escapeHtml(finalState.query)}" oninput="handleModelSearchInput(this)" oncompositionstart="modelSearchCompositionStart()" oncompositionend="modelSearchCompositionEnd(this)"></div><div class="brand-filters">${['Apple','Samsung','OPPO','vivo','Xiaomi','realme'].map(x=>`<button type="button" onclick="searchCatalogue('${x}')">${x}</button>`).join('')}</div><div class="catalogue-results" id="catalogueResults">${renderSearchResults()}</div><button class="ghost-button" type="button" onclick="showFinalHome()">Choose Assessment Mode</button></section>`;syncFlowBackControls();setTimeout(()=>document.getElementById('modelSearch')?.focus(),20)}
 function renderSearchResults(){if(!finalState.query)return `<div class="info-note">Try “S24 Ultra”, “13 Pro”, “Reno”, or “Xiaomi 15”.</div>`;if(!finalState.results.length)return `<div class="info-note">No match yet. Try a shorter brand or model keyword.</div>`;return finalState.results.map(r=>`<button class="catalogue-result" type="button" onclick="selectCatalogueDevice('${r.catalogue_id}')"><b>${escapeHtml(r.brand)} ${escapeHtml(r.model)}</b><span>${escapeHtml(r.status||'catalogue')} · Storage confirmation required</span></button>`).join('')}
 let searchTimer=null,modelSearchComposing=false;
@@ -1476,7 +1503,7 @@ window.confirmFinalStorage=async function(){
 }
 function photoCount(){return requiredViews.filter(v=>finalState.photos[v.id]).length}
 function progressText(){if(finalState.processing)return 'Analyzing exterior condition';const n=photoCount();return n===0?'Waiting for photos':`${n} of 5 views ready`}
-function renderFinalScanner(){const n=photoCount(),pct=Math.round(n/requiredViews.length*100);document.getElementById('scanPage').innerHTML=`<section class="hero scan-hero"><div class="eyebrow">STEP 3</div><h1>Exterior Scan</h1></section><section class="card tech"><div class="card-title"><h2>Exterior condition scanner</h2><span class="step">${n}/5 VIEWS</span></div><div class="scanner final-scanner ${finalState.processing?'scanning':''}"><i class="corner c1"></i><i class="corner c2"></i><i class="corner c3"></i><i class="corner c4"></i><div class="final-slot-grid">${requiredViews.map(renderPhotoSlot).join('')}</div></div><div class="energy-bar ${finalState.processing?'processing':''}" style="--p:${pct}%"><i></i></div><div class="final-status" role="status"><span>${progressText()}</span><b>${finalState.processing?'AI':pct+'%'}</b></div>${renderRemoteBox()}<p class="helper-line">Analysis sends photos to the backend and uses Gemini for corroboration if configured.</p><div class="final-actions"><button class="secondary" type="button" onclick="triggerNextPhoto(true)">${finalState.target==='other'?'Open Camera':'Upload Photos'}</button><button class="primary" type="button" onclick="analyzeFinalExterior()">Analyze Exterior</button></div><button class="ghost-button" type="button" onclick="goToAssessmentMode()">Choose Assessment Mode</button></section>${renderHiddenInputs()}`;renderFinalResultCTA();syncFlowBackControls()}
+function renderFinalScanner(){const n=photoCount(),pct=Math.round(n/requiredViews.length*100);document.getElementById('scanPage').innerHTML=`<section class="hero scan-hero"><div class="eyebrow">STEP 3</div><h1>Exterior Scan</h1></section><section class="card tech"><div class="card-title"><h2>Exterior condition scanner</h2><span class="step">${n}/5 VIEWS</span></div><div class="scanner final-scanner ${finalState.processing?'scanning':''}"><i class="corner c1"></i><i class="corner c2"></i><i class="corner c3"></i><i class="corner c4"></i><div class="final-slot-grid">${requiredViews.map(renderPhotoSlot).join('')}</div></div><div class="energy-bar ${finalState.processing?'processing':''}" style="--p:${pct}%"><i></i></div><div class="final-status" role="status"><span>${progressText()}</span><b>${finalState.processing?'AI':pct+'%'}</b></div>${renderRemoteBox()}<p class="helper-line">Your photos go to the ReValue server for YOLO analysis. The optional checkbox also sends them to Gemini if configured.</p><div class="final-actions"><button class="secondary" type="button" onclick="triggerNextPhoto(true)">${finalState.target==='other'?'Open Camera':'Upload Photos'}</button><label class="helper-line"><input id="verifyWithGemini" type="checkbox" ${finalState.verifyWithGemini?'checked':''} onchange="setGeminiVerification(this.checked)"> Send photos to Gemini for optional verification</label><button class="primary" type="button" onclick="analyzeFinalExterior()">Analyze Exterior</button></div><button class="ghost-button" type="button" onclick="goToAssessmentMode()">Choose Assessment Mode</button></section>${renderHiddenInputs()}`;renderFinalResultCTA();syncFlowBackControls()}
 function renderPhotoSlot(v){const p=finalState.photos[v.id],detections=(finalState.analysis?.detections||[]).filter(d=>d.view===v.id||d.view===v.apiView);return `<button class="final-slot ${p?'ready':''} ${finalState.processing?'processing':''}" type="button" onclick="triggerPhoto('${v.id}')"><div class="slot-preview">${p?`<img loading="lazy" decoding="async" src="${p.dataUrl}" alt="${v.label}">${p.width&&p.height?`<span class="image-boxes" style="width:min(100cqw,${100*p.width/p.height}cqh);height:min(100cqh,${100*p.height/p.width}cqw)">${detections.map(d=>bboxHtml(d,p)).join('')}</span>`:''}`:`<span>${v.label}</span>`}</div><b>${v.label}</b><span>${p?escapeHtml(p.name):'Empty'}</span><small>${p?'Ready / Uploaded':'Add Photo'}</small></button>`}
 function bboxHtml(d,p){const b=d.bounding_box_xyxy;if(!b||!p.width||!p.height)return '';const l=Math.max(0,Math.min(100,b[0]/p.width*100)),t=Math.max(0,Math.min(100,b[1]/p.height*100)),w=Math.max(1,Math.min(100,(b[2]-b[0])/p.width*100)),h=Math.max(1,Math.min(100,(b[3]-b[1])/p.height*100));const label=escapeHtml(d.raw_class.replace(/_/g,' '));return `<i class="damage-box" style="left:${l}%;top:${t}%;width:${w}%;height:${h}%"><em class="damage-tag">${label}</em></i>`}
 function renderHiddenInputs(){return requiredViews.map(v=>`<input id="finalInput-${v.id}" type="file" accept="image/*" capture="environment" onchange="handleFinalPhoto('${v.id}',this)" hidden>`).join('')}
@@ -1562,6 +1589,7 @@ async function pollRemoteSession(){
   }finally{remotePollInProgress=false}
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopFinalPoll();else if(finalState.session&&!finalState.session.complete)startFinalPoll()});
+window.setGeminiVerification=value=>{finalState.verifyWithGemini=value};
 window.analyzeFinalExterior=async function(){
   if(finalState.processing)return;
   if(finalState.session&&!finalState.session.complete&&Object.values(finalState.photos).some(photo=>photo.source==='remote')){
@@ -1580,7 +1608,7 @@ window.analyzeFinalExterior=async function(){
     return {view:id,filename:photo.name,mime_type:photo.mime_type,bytes_b64:photo.bytes_b64};
   });
   try{
-    const analysis=await api('/analyze-exterior',{method:'POST',body:JSON.stringify({images})});
+    const analysis=await api('/analyze-exterior',{method:'POST',body:JSON.stringify({images,confirmed_device:finalState.confirmedDevice,verify_with_gemini:finalState.verifyWithGemini})});
     if(revision!==scanRevision)return;
     if(analysis.status!=='ok')throw new Error(analysis.error||'Exterior analysis could not complete.');
     finalState.analysis=analysis;
@@ -1591,7 +1619,7 @@ window.analyzeFinalExterior=async function(){
     finalState.reportId='RVA-LIVE-'+reportToken;
     exteriorDone=true;
     try{
-      const valuation=await api('/live-valuation',{method:'POST',body:JSON.stringify({confirmed_device:finalState.confirmedDevice,exterior_grade:grade})});
+      const valuation=await api('/live-valuation',{method:'POST',body:JSON.stringify({confirmed_device:finalState.confirmedDevice,exterior_grade:grade,valuation_basis:"exterior_scan",assessment_receipt:analysis.assessment_receipt})});
       if(revision===scanRevision)finalState.valuation=valuation;
     }catch(error){
       if(revision===scanRevision)toast('Valuation unavailable. The exterior grade is still available.');
@@ -1620,6 +1648,8 @@ function renderFinalResultCTA(){
   document.getElementById('scanPage').insertAdjacentHTML('beforeend',`<section class="card">
     <div class="card-title"><h3>Exterior Grade</h3><span class="step">${escapeHtml(grade)}</span></div>
     <p>${label}. ${escapeHtml(analysis.grade?.note||'')}</p>
+    ${['verification_failed','temporarily_unavailable','not_configured'].includes(analysis.gemini_status)
+      ? '<p>Optional Gemini verification was unavailable. Review the YOLO findings in person.</p>' : ''}
     <div class="damage-chip-row">${chips||'<span>No damage detected in the supplied photos</span>'}</div>
     ${exteriorDone?`<button class="primary" type="button" onclick="showPage('report')">View Exterior Report</button>`:''}
   </section>`);
@@ -1629,16 +1659,97 @@ function liveMarketText(){return marketRangeFromAssessment(syncCurrentAssessment
 function detectedDamageText(){return syncCurrentAssessment()?.condition?.detected_damage||'None confirmed'}
 function demoDamageSummary(deviceId){const findings=(exteriorProfiles[deviceId]||exteriorProfiles.iphone).findings||[];if(!findings.length)return 'None confirmed';return findings.slice(0,2).map(x=>x.title.includes('crack')||x.title.includes('Crack')?'Crack':x.title.includes('scratch')||x.title.includes('Scratch')?'Scratch':x.title).join(', ')}
 function buildDemoAssessment(){const d=devices[selected],v=valuationFor(selected),storage=`${v.storage_gb||''}GB`.replace(/^GB$/,'');return {assessment_id:`demo-${d.report}`,report_id:d.report,assessment_mode:'demo',device:{brand:v.brand||'',model:v.model||d.name,storage,device_model:d.name},condition:{exterior_grade:d.grade,internal_grade:d.internal,detected_damage:demoDamageSummary(selected),risk_level:lang==='zh'?d.riskZh:d.risk},valuation:{market_value_low:v.market_value_low_rm,market_value_high:v.market_value_high_rm,confidence:v.evidence_tier||'',comparable_count:v.exact_model_comparables,condition_matched_count:v.condition_matched_comparables,valuation_source:v.model_version||'ReValue valuation'},shop_offers:{}}}
-function buildLiveAssessment(){const c=finalState.confirmedDevice||{},v=finalState.valuation||{},deviceModel=[c.brand, c.model].filter(Boolean).join(' ')||'Confirmed phone';return {assessment_id:`live-${finalState.reportId}`,report_id:finalState.reportId,assessment_mode:'live',device:{brand:c.brand||'',model:c.model||deviceModel,storage:c.storage||finalState.storage||'',device_model:deviceModel},condition:{exterior_grade:exteriorDone?finalState.analysis.grade.exterior_grade:'Pending',internal_grade:'Not assessed',assessment_basis:finalState.analysis?.assessment_basis,detected_damage:(()=>{const rows=(finalState.analysis?.merged_damage||[]).filter(x=>x.grade_affecting);if(!rows.length)return 'None detected';return [...new Set(rows.map(x=>x.damage_type.includes('crack')?'Crack':x.damage_type.includes('scratch')?'Scratch':x.damage_type.replace(/_/g,' ')))].join(', ')})(),risk_level:'Not assessed'},valuation:{market_value_low:v.value_low,market_value_high:v.value_high,confidence:v.evidence_status||v.status||'',comparable_count:v.exact_model_count||0,condition_matched_count:v.condition_matched_count||0,valuation_source:v.fallback_source||v.status||'ReValue live valuation'},shop_offers:{}}}
+function buildLiveAssessment(){const c=finalState.confirmedDevice||{},v=finalState.valuation||{},deviceModel=[c.brand, c.model].filter(Boolean).join(' ')||'Confirmed phone';return {assessment_id:`live-${finalState.reportId}`,report_id:finalState.reportId,assessment_mode:'live',device:{brand:c.brand||'',model:c.model||deviceModel,storage:c.storage||finalState.storage||'',device_model:deviceModel},condition:{exterior_grade:exteriorDone?finalState.analysis.grade.exterior_grade:'Pending',internal_grade:'Not assessed',assessment_basis:finalState.analysis?.assessment_basis,detected_damage:(()=>{const rows=(finalState.analysis?.merged_damage||[]).filter(x=>x.grade_affecting);if(!rows.length)return 'None detected';return [...new Set(rows.map(x=>x.damage_type.includes('crack')?'Crack':x.damage_type.includes('scratch')?'Scratch':x.damage_type.replace(/_/g,' ')))].join(', ')})(),risk_level:'Not assessed'},valuation:{market_value_low:v.value_low,market_value_high:v.value_high,confidence:v.evidence_status||v.status||'',comparable_count:v.exact_model_count||0,condition_matched_count:v.condition_matched_count||0,valuation_source:v.price_basis||'insufficient_market_evidence',observations:v.eligible_observations||[],exclusions:v.exclusions||{},price_notes:v.notes||[],references:[...(v.trade_in_benchmark||[]),...(v.repair_references||[])]},shop_offers:{}}}
 function syncCurrentAssessment(){const a=finalState.active?buildLiveAssessment():buildDemoAssessment();a.shop_offers={};shops.forEach((_,i)=>{a.shop_offers[i]=shopOfferData(i,a)});finalState.currentAssessment=a;window.currentAssessment=a;return a}
 function cloneAssessment(a){return JSON.parse(JSON.stringify(a||syncCurrentAssessment()))}
 function roundedRm50(n){return Math.round(Number(n||0)/50)*50}
-function dealerPayoutFromAssessment(kind,a){const v=a?.valuation||{},grade=a?.condition?.exterior_grade||'B';if(!v.market_value_low||!v.market_value_high)return null;const midpoint=(Number(v.market_value_low)+Number(v.market_value_high))/2,table=dealerBands[kind]||dealerBands.cash,band=table[grade]||table.D;return {low:roundedRm50(midpoint*band[0]),high:roundedRm50(midpoint*band[1]),midpoint}}
+function dealerPayoutFromAssessment(kind,a){if(a.assessment_mode!=='demo')return null;const v=a?.valuation||{},grade=a?.condition?.exterior_grade||'B';if(!v.market_value_low||!v.market_value_high)return null;const midpoint=(Number(v.market_value_low)+Number(v.market_value_high))/2,table=dealerBands[kind]||dealerBands.cash,band=table[grade]||table.D;return {low:roundedRm50(midpoint*band[0]),high:roundedRm50(midpoint*band[1]),midpoint}}
 function shopOfferData(shopIndex,a){const s=shops[shopIndex]||shops[0];if(s.name.includes('GreenTech')||s.offerType==='tradein'){const p=dealerPayoutFromAssessment('tradein',a);return {shop_id:String(shopIndex),offer_type:'trade_in_offer',label:'Trade-In Offer',action:'Trade in',display:p?`Up to RM${money(p.high)}`:'Quote after inspection',dealer_offer_low:p?.low||null,dealer_offer_high:p?.high||null,note:'Estimated • Final offer after inspection'}}if(s.name.includes('EcoPhone')||s.offerType==='market'){const p=dealerPayoutFromAssessment('cash',a);return {shop_id:String(shopIndex),offer_type:'cash_buyback_offer',label:'Cash Buyback Offer',action:'Sell for cash',display:p?`RM${money(p.low)}–RM${money(p.high)}`:'Quote after inspection',dealer_offer_low:p?.low||null,dealer_offer_high:p?.high||null,note:'Estimated • Final offer after inspection'}}if(s.offerType==='repair')return {shop_id:String(shopIndex),offer_type:'repair_quote',label:'Repair',action:'Repair',display:'Quote after inspection',dealer_offer_low:null,dealer_offer_high:null,note:'Final quote after inspection'};return {shop_id:String(shopIndex),offer_type:'diagnostic_check',label:'Diagnostic Check',action:s.action||'Check',display:'Quote after inspection',dealer_offer_low:null,dealer_offer_high:null,note:'Final quote after inspection'}}
 function renderFinalGates(){const ready=finalState.active&&exteriorDone&&!finalState.processing;document.querySelectorAll('.requires-report').forEach(el=>el.style.display=ready?'':'none');const report=document.getElementById('reportPending'),shopsPending=document.getElementById('shopsPending'),shopList=document.getElementById('shopList');if(report)report.style.display=ready?'none':'block';if(shopsPending)shopsPending.style.display=ready?'none':'block';if(ready){updateReport();renderShops()}else{if(report)report.innerHTML=`<div class="pending-hero"><div class="pending-icon">...</div><div class="pending-copy"><h3>Report pending</h3><p>Finish the exterior scan.</p></div></div>`;if(shopsPending)shopsPending.innerHTML=`<div class="pending-hero"><div class="pending-icon">AD</div><div class="pending-copy"><h3>Offers locked</h3><p>Ready after valuation.</p></div></div>`;if(shopList)shopList.innerHTML=''}}
-window.updateReport=function(){const a=syncCurrentAssessment(),v=a.valuation||{},c=a.condition||{},d=a.device||{};document.getElementById('overallGrade').textContent=c.exterior_grade||'Pending';document.getElementById('reportPhone').textContent=d.device_model||[d.brand,d.model].filter(Boolean).join(' ');document.getElementById('reportMeta').textContent=`${d.storage||''} · Exterior ${c.exterior_grade||'Pending'} (${a.assessment_mode==='demo'?'demo':c.assessment_basis==='ai_corroborated'?'AI corroborated':'provisional'}) · Internal ${c.internal_grade} · Report ID ${a.report_id}`;document.getElementById('estimatedValue').textContent=marketRangeFromAssessment(a);const damageLabel=document.querySelector('#repairCost')?.previousElementSibling;if(damageLabel)damageLabel.textContent='Detected Damage';document.getElementById('repairCost').textContent=c.detected_damage||'None confirmed';document.getElementById('reportReco').textContent='Compare Store Offers';document.getElementById('evidenceStats').innerHTML=`<div class="evidence-stat"><b>${v.comparable_count||0}</b><span>Exact-Model Comparables</span></div><div class="evidence-stat"><b>${v.condition_matched_count||0}</b><span>Condition-Matched Comparables</span></div>`;const panel=document.getElementById('priceEvidencePanel');if(panel){panel.classList.toggle('open',evidenceOpen);panel.innerHTML=evidenceOpen?`<div class="evidence-section"><h4>PRICE EVIDENCE</h4><div class="evidence-grid"><div class="evidence-chip"><small>Device</small><b>${escapeHtml(d.device_model||d.model)}</b></div><div class="evidence-chip"><small>Storage</small><b>${escapeHtml(d.storage||'Confirmed by user')}</b></div><div class="evidence-chip"><small>Market Value</small><b>${marketRangeFromAssessment(a)}</b></div><div class="evidence-chip"><small>Source</small><b>${escapeHtml(v.valuation_source||'ReValue valuation')}</b></div></div></div>`:''}document.getElementById('reportId').textContent=a.report_id;document.getElementById('qrState').textContent=`${d.device_model||d.model} · ${d.storage||''} · Exterior ${c.exterior_grade||'Pending'} · Value ${marketRangeFromAssessment(a)}`;document.getElementById('barExteriorGrade').textContent=c.exterior_grade||'Pending';document.getElementById('barBatteryGrade').textContent=c.internal_grade||'Not assessed';document.getElementById('barPerformanceGrade').textContent=a.assessment_mode==='demo'?'A-':'Not assessed';document.getElementById('barConnectivityGrade').textContent=a.assessment_mode==='demo'?'A-':'Not assessed';document.getElementById('barRiskGrade').textContent=c.risk_level||'Medium';renderQr(a.report_id)}
+function safeListingLink(value){
+  try{
+    const url=new URL(value);
+    if(url.protocol==='https:'&&!url.username&&!url.password)return url.href;
+  }catch{}
+  return '';
+}
+function renderObservation(row){
+  const link=safeListingLink(row.source_url);
+  const label=escapeHtml(row.source||'Source');
+  const origin=row.evidence_origin==='audited_csv'?'operator-reviewed':'search-grounded';
+  return `<li>${link?`<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${label}</a>`:label}
+    · RM${money(row.price)} · ${escapeHtml(String(row.price_type||'').replace(/_/g,' '))}
+    · ${escapeHtml(row.observed_at||'date unknown')} · ${origin}</li>`;
+}
+function renderLiveEvidence(a){
+  const v=a.valuation;
+  const observations=v.observations?.length?v.observations.map(renderObservation).join(''):'<li>No sufficient set of eligible comparables.</li>';
+  const excluded=Object.values(v.exclusions||{}).reduce((total,count)=>total+count,0);
+  const references=v.references?.length?`<h4>Separate trade-in and repair references</h4><ul>${v.references.map(renderObservation).join('')}</ul>`:'';
+  return `<div class="evidence-section"><h4>Malaysian resale evidence</h4>
+    <p>Eligible rows match this model, storage and exterior condition and were observed within 90 days.
+      Search-grounded rows have a matching source link. Prices may be asking or retail prices.</p>
+    <ul>${observations}</ul>
+    ${excluded?`<p>${excluded} row(s) excluded for date, listing duplication, link or condition.</p>`:''}
+    ${references}<p>Internal function and final offers require inspection.</p></div>`;
+}
+document.getElementById('decisionForm').onsubmit=event=>{
+  event.preventDefault();
+  const output=document.getElementById('decisionResult');
+  try{
+    const fields=Object.fromEntries(new FormData(event.currentTarget));
+    const result=window.ReValueDecisionSupport.compareQuotes(fields);
+    output.innerHTML=`<strong>${escapeHtml(result.next)}</strong><p>${escapeHtml(result.reason)}</p>
+      ${result.options.length?`<ul>${result.options.map(o=>`<li>${escapeHtml(o.label)}: ${o.sen<0?'−':''}RM${money(Math.abs(o.sen)/100)}</li>`).join('')}</ul>`:''}`;
+  }catch(error){output.textContent=error.message}
+};
+window.updateReport=function(){
+  const a=syncCurrentAssessment(),v=a.valuation||{},c=a.condition||{},d=a.device||{};
+  const live=a.assessment_mode==='live';
+  const basis=live?(c.assessment_basis==='ai_corroborated'?'AI corroborated':'provisional'):'demo';
+  const status=marketRangeFromAssessment(a);
+  document.getElementById('overallGrade').textContent=c.exterior_grade||'Pending';
+  document.getElementById('reportPhone').textContent=d.device_model||[d.brand,d.model].filter(Boolean).join(' ');
+  document.getElementById('reportMeta').textContent=`${d.storage||''} · Exterior ${c.exterior_grade||'Pending'} (${basis}) · Internal ${c.internal_grade} · Report ID ${a.report_id}`;
+  document.getElementById('estimatedValue').textContent=status;
+  document.getElementById('marketBasis').textContent=live
+    ? (v.price_notes?.join(' ')||'No eligible live estimate. Demo figures are not used.') : 'Illustrative demo values.';
+  const damageLabel=document.getElementById('repairCost').previousElementSibling;
+  damageLabel.textContent='Detected damage';
+  document.getElementById('repairCost').textContent=c.detected_damage||'None detected';
+  document.getElementById('reportReco').textContent=live?'Compare written quotes below':'Compare illustrative offers';
+  document.getElementById('evidenceStats').textContent=live?`${v.condition_matched_count||0} condition-matched observations`:'';
+  const evidenceToggle=document.getElementById('priceEvidenceToggle');
+  evidenceToggle.textContent=evidenceOpen?'Hide price evidence':'How is this price estimated?';
+  evidenceToggle.setAttribute('aria-expanded',String(evidenceOpen));
+  const panel=document.getElementById('priceEvidencePanel');
+  panel.classList.toggle('open',evidenceOpen);
+  panel.innerHTML=evidenceOpen?(live?renderLiveEvidence(a):priceEvidenceHtml(devices[selected],valuationFor(selected))):'';
+  for(const [field,value] of Object.entries({
+    barExteriorGrade:c.exterior_grade||'Pending', barBatteryGrade:c.internal_grade,
+    barPerformanceGrade:live?'Not assessed':'A-', barConnectivityGrade:live?'Not assessed':'A-',
+    barRiskGrade:c.risk_level||'Not assessed', reportId:a.report_id,
+  }))document.getElementById(field).textContent=value;
+  document.getElementById('qrState').textContent=`${d.device_model||d.model} · ${d.storage||''} · Exterior ${c.exterior_grade||'Pending'} · Value ${status}`;
+  document.getElementById('reportIdentityLabel').textContent=live?'Report ID':'Demo QR report ID';
+  document.getElementById('reportIdentityStep').textContent=live?'LOCAL REPORT':'DEMO';
+  document.getElementById('reportShopButton').textContent=live?'View example shops':'Find recommended shops';
+  document.getElementById('qr').hidden=live;
+  if(!live)renderQr(a.report_id);
+  for(const field of ['Exterior','Battery','Performance','Connectivity','Risk']){
+    document.getElementById('bar'+field+'Meter').style.display=live?'none':'';
+  }
+  const card=document.getElementById('decisionCard');
+  card.hidden=!live;
+  const form=document.getElementById('decisionForm');
+  if(form.dataset.reportId!==String(a.report_id)){
+    form.reset();
+    form.dataset.reportId=a.report_id;
+    document.getElementById('decisionResult').textContent='';
+  }
+};
 function offerRangeFor(kind){return shopOfferData(kind==='tradein'?2:3,syncCurrentAssessment()).display}
-window.renderShops=function(){const a=syncCurrentAssessment();const small=['Action','Distance','Get Quote','Share report','Sponsored','Match'];document.getElementById('shopList').innerHTML='<p class="helper-line">Illustrative shop offers and conversations</p>'+shops.map((s,i)=>{const offerData=shopOfferData(i,a),tag=s.name.includes('GreenTech')?'Best trade-in offer':s.name.includes('EcoPhone')?'Best cash offer':s.offerType==='repair'?'Best for repair':'Closest';let primary='Share report',secondary='Contact';if(s.offerType==='repair'){primary='View Shop';secondary='Get Quote'}return `<article class="shop-card"><div class="shop-photo"><img loading="lazy" decoding="async" src="${s.image}" alt="${s.name} storefront"><div class="shop-badges"><strong class="adtag">${small[4]} #${i+1}</strong><div class="match"><strong>${s.match}</strong><small>${small[5]}</small></div></div></div><div class="shop-body"><div class="shop-top"><div><b>${s.name}</b></div></div><div class="shop-service">${tag}</div><div class="shop-metrics"><div><strong>${offerData.action}</strong><small>${small[0]}</small></div><div><strong class="offer-strong">${offerData.display}</strong><small>${offerData.label}<span class="quote-note">${offerData.note}</span></small></div><div><strong>${s.distance}</strong><small>${small[1]}</small></div></div><div class="shop-actions"><button class="secondary" onclick="openChat(${i},false,false)">${secondary}</button><button class="primary" style="margin:0;padding:11px" onclick="openChat(${i},true,false)">${primary}</button></div></div></article>`}).join('')}
+window.renderShops=function(){const a=syncCurrentAssessment();const live=a.assessment_mode==='live';const small=['Action','Distance','Get Quote','Share report','Sponsored','Match'];document.getElementById('shopList').innerHTML='<p class="helper-line">Illustrative shop directory and simulated conversations. Request real quotes separately.</p>'+shops.map((s,i)=>{const offerData=shopOfferData(i,a),tag=live?'Example shop listing':s.name.includes('GreenTech')?'Best trade-in offer':s.name.includes('EcoPhone')?'Best cash offer':s.offerType==='repair'?'Best for repair':'Closest';let primary='Share report',secondary='Contact';if(s.offerType==='repair'){primary='View Shop';secondary='Get Quote'}return `<article class="shop-card"><div class="shop-photo"><img loading="lazy" decoding="async" src="${s.image}" alt="${s.name} storefront"><div class="shop-badges"><strong class="adtag">${small[4]} #${i+1}</strong>${live?'':`<div class="match"><strong>${s.match}</strong><small>${small[5]}</small></div>`}</div></div><div class="shop-body"><div class="shop-top"><div><b>${s.name}</b></div></div><div class="shop-service">${tag}</div><div class="shop-metrics"><div><strong>${offerData.action}</strong><small>${small[0]}</small></div><div><strong class="offer-strong">${offerData.display}</strong><small>${offerData.label}<span class="quote-note">${offerData.note}</span></small></div><div><strong>${s.distance}</strong><small>${small[1]}</small></div></div><div class="shop-actions"><button class="secondary" onclick="openChat(${i},false,false)">${secondary}</button><button class="primary" style="margin:0;padding:11px" onclick="openChat(${i},true,false)">${primary}</button></div></div></article>`}).join('')}
 function jsLiteral(text){return String(text||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
 function conversationKeyFor(shopIndex,a){return `${a.report_id}::shop-${shopIndex}`}
 function assessmentFromConversation(c){if(c?.assessment)return c.assessment;if(c?.device&&devices[c.device]){const oldSelected=selected;selected=c.device;const a=buildDemoAssessment();selected=oldSelected;return a}return syncCurrentAssessment()}

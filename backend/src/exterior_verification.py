@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, get_args
 
 from .gemini_client import GeminiAuthorizationRequired, GeminiClient, GeminiTemporaryUnavailable
-from .schemas import GeminiDamageVerification, ImageInput, YoloDetection
+from .schemas import DamageType, GeminiDamageVerification, ImageInput, Severity, YoloDetection
 
 
 DAMAGE_VERIFICATION_SCHEMA: dict[str, Any] = {
@@ -71,15 +71,19 @@ def verify_damage_with_gemini(
     if not isinstance(response, dict) or not isinstance(response.get("verifications"), list):
         return "verification_failed", []
 
-    verifications = [
-        GeminiDamageVerification(
-            damage_type=item.get("damage_type", "other_visible_damage"),
-            view=item.get("view", "unknown"),
-            status=item.get("status", "uncertain"),
-            severity=item.get("severity", "unknown"),
-            visual_evidence=item.get("visual_evidence", []),
-        )
-        for item in response["verifications"]
-        if isinstance(item, dict)
-    ]
+    verifications = []
+    valid_views = {image.view for image in images}
+    for item in response["verifications"]:
+        if not isinstance(item, dict):
+            return "verification_failed", []
+        damage = item.get("damage_type")
+        view = item.get("view")
+        state = item.get("status")
+        severity = item.get("severity", "unknown")
+        evidence = item.get("visual_evidence", [])
+        if (damage not in get_args(DamageType) or not isinstance(view, str) or view not in valid_views
+                or state not in ("supports", "does_not_support", "uncertain") or severity not in get_args(Severity)
+                or not isinstance(evidence, list) or any(not isinstance(detail, str) for detail in evidence)):
+            return "verification_failed", []
+        verifications.append(GeminiDamageVerification(damage, view, state, severity, evidence))
     return "ok", verifications

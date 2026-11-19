@@ -26,16 +26,17 @@ Run the automated checks and start the server from the repository root:
 ```bash
 set -e
 for test in backend/tests/*.py; do REVALUE_TEST_REAL_MODEL=1 python "$test"; done
+node fyp/test_decision_support.cjs
 python fyp/test_evaluate_detection.py
 for test in fyp/benchmark/test_*.py; do python "$test"; done
 python -m backend.src.server
 ```
 
-With the server running and Playwright plus Chromium installed, run `node fyp/browser_smoke.cjs` to check review gating, insufficient-evidence pricing and report IDs. Set `CHROMIUM_PATH` to use a system Chromium.
+With the server running and Playwright plus Chromium installed, run `node fyp/browser_smoke.cjs` to check the photo-to-report flow, the review gate, the no-price path, fixture evidence links, quote comparison and QR capture in two tabs. Set `CHROMIUM_PATH` to use a system Chromium and `REVALUE_SMOKE_URL` if the server uses a custom address or port.
 
 Open `http://127.0.0.1:8765` and confirm `/health` returns `{"status":"ok", ...}`. Choose **Value Another Phone**, search the catalogue, confirm storage, attach front, back, camera, left and right photos, then choose **Analyze Exterior**. Test replacing a photo after analysis. The previous grade and valuation should be cleared. To check QR capture across two devices, run on a trusted network and open the app via a host address reachable from both. The localhost address is only reachable from the server machine. Use consented test photos. Uploads accept JPEG, PNG and WebP up to 8 MiB and 16 megapixels each.
 
-Without a Gemini key, the catalogue, YOLO and eligible local fallback valuations can run independently. For authorized live integration tests, configure `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) in the server environment, set `REVALUE_GEMINI_MODEL` to an available Gemini model, and allow access to Google's Gemini API. The server does not automatically load .env files. Gemini verification may involve sending the selected photos to the API. Verify account access and search grounding separately. Demo Mode contains illustrative values and internal diagnostics. Shop offers and conversations are simulations.
+The catalogue, bundled YOLO11n and quote comparison run locally. Live valuations use only recent condition-matched observations. If the market provider is unavailable and no operator-reviewed observations are configured, the report gives no price. Demo figures and simulated shop chats are labelled separately. Optional Gemini image verification is off by default in the browser. For authorized live integration tests configure `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and `REVALUE_GEMINI_MODEL` in the server environment. The server does not load .env files automatically. See the [FYP1 system handoff](FYP1_SYSTEM_HANDOFF.md) for the operator-reviewed CSV schema and demonstration steps. Independent model benchmarking and annotation belong to FYP2.
 
 The default detector is the bundled YOLO11n. For trusted compatible YOLO weights, set `REVALUE_DETECTOR_WEIGHTS=/path/to/weights.pt` and optionally `REVALUE_DETECTOR_IMGSZ=960`, then restart. A detector adapter can use the callable boundary in `analyze_exterior`: return view-specific candidates and pixel coordinates using `YoloDetection`. The RT-DETR option in the evaluator is separate from the server's default YOLO loader.
 

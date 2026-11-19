@@ -36,6 +36,9 @@ def analyze_exterior(
             raise ValueError("Front and back photos are required for an exterior grade.")
         if len(views) > 5 or len(views) != len(set(views)) or any(view not in EXTERIOR_VIEWS for view in views):
             raise ValueError("Supply up to five distinct exterior views.")
+        supplied_photos = [image.bytes_b64 for image in images if image.bytes_b64]
+        if len(supplied_photos) != len(set(supplied_photos)):
+            raise ValueError("Use a separate photo for each exterior view.")
         if detector is None:
             try:
                 imgsz = int(os.environ.get("REVALUE_DETECTOR_IMGSZ", DEFAULT_IMGSZ))
@@ -63,11 +66,13 @@ def analyze_exterior(
 
     merged = merge_damage_signals(detections, verifications)
     grade = grade_from_atomic_damage(merged)
-    contested = any(item.support == "needs_review" for item in merged)
+    contested = any(item.manual_review for item in merged)
     unresolved = any(item.damage_type is None for item in detections)
     grade_items = [item for item in merged if item.grade_affecting]
     corroborated = bool(grade_items) and all(item.support == "hybrid_supported" for item in grade_items)
     basis = "ai_corroborated" if corroborated else "provisional"
+    if not merged and not unresolved:
+        grade = GradeResult("A", ["no_damage_detected"], "No damage was detected in these photos. Check the phone in person before treating it as clean.")
     if contested or unresolved:
         basis = "review_required"
         grade = GradeResult("pending", ["unresolved_damage"], "A damage candidate needs review before valuation.")

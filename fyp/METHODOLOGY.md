@@ -9,13 +9,13 @@ flowchart LR
     A[Guided photo upload or QR capture] --> B[Validate and normalize images]
     B --> C[Bundled YOLO11n proposes view-specific damage]
     C --> D[Evidence review and deterministic condition rules]
-    D -->|Valid provisional or corroborated grade| E[Catalogue and market evidence]
+    D -->|Valid provisional or corroborated grade| E[Scan receipt and matched market evidence]
     D -->|Unresolved or failed| F[Pending grade and no valuation]
     E --> G[Indicative MYR range or insufficient evidence]
-    G --> H[Exterior report with evidence basis]
+    G --> H[Exterior report and user-entered quote comparison]
 ```
 
-The app confirms the model and storage through the phone catalogue. Bounding boxes are candidate observations, and model confidence does not measure damage severity. The grade combines visible damage with view context under fixed rules. Gemini corroboration is optional and does not replace human inspection. Explain why a provisional grade can be revised, why a missing detection is not proof of a clean device, and why a market range is conditional on available observations or labelled local calibration.
+The app confirms model and storage through the phone catalogue. Bounding boxes are candidate observations. The grade combines visible damage with view context under fixed rules. Gemini corroboration is optional. A provisional grade is open to revision after inspection. A missing detection does not establish that the phone is clean. A live range requires recent, condition-matched Malaysian price observations. Archived calibration values are labelled as illustrative. The report compares resale, trade-in and repair scenarios using separately entered offers and costs. [System handoff and decision rules](FYP1_SYSTEM_HANDOFF.md)
 
 Benchmark annotation, adjudication and model experiments run off the application path. Houdan remains a separate experimental checkpoint. Its `crack` output is normalized only in the comparison; bump and paint are counted separately and do not influence ReValue grading.
 

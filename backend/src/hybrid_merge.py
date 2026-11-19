@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .schemas import GeminiDamageVerification, MergedDamage, YoloDetection
 
 
@@ -27,17 +29,15 @@ def merge_damage_signals(
     for detection in yolo_detections:
         if detection.damage_type is None:
             continue
-        matching_index = next(
-            (
-                idx
-                for idx, verification in enumerate(gemini_verifications)
-                if verification.damage_type == detection.damage_type and verification.view == detection.view
-            ),
-            None,
-        )
-        verification = gemini_verifications[matching_index] if matching_index is not None else None
-        if matching_index is not None:
-            used_gemini.add(matching_index)
+        matching = [
+            i for i, item in enumerate(gemini_verifications)
+            if item.damage_type == detection.damage_type and item.view == detection.view
+        ]
+        reviews = [gemini_verifications[i] for i in matching]
+        verification = reviews[0] if reviews else None
+        used_gemini.update(matching)
+        if len({(item.status, item.severity) for item in reviews}) > 1:
+            verification = replace(reviews[0], status="uncertain", severity="unknown")
 
         if verification and verification.status == "supports":
             support = "hybrid_supported"
@@ -86,7 +86,7 @@ def merge_damage_signals(
         )
 
     for idx, verification in enumerate(gemini_verifications):
-        if idx in used_gemini or verification.status != "supports":
+        if idx in used_gemini or verification.status not in {"supports", "uncertain"}:
             continue
         merged.append(
             MergedDamage(

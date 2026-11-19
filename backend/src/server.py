@@ -11,15 +11,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from .assessment_receipt import PRICEABLE_BASES, issue_receipt, verify_receipt
 from .device_identification import identify_device
 from .exterior_analysis import analyze_exterior
 from .grading_rules import grade_from_atomic_damage
 from .image_upload import EXTERIOR_VIEWS, decode_image
-from .local_valuation import local_fallback_valuation
-from .market_evidence import exterior_grade_error_response, normalize_exterior_grade, parse_storage_gb, retrieve_current_market_evidence
+from .live_estimate import build_live_estimate
+from .market_evidence import canonicalize_confirmed_device, exterior_grade_error_response, normalize_exterior_grade, retrieve_current_market_evidence
 from .phone_catalogue import confirm_device, get_catalogue_device, search_catalogue
 from .schemas import ImageInput, MergedDamage, YoloDetection
-from .valuation import value_from_market_observations
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 APP_HTML = APP_DIR / "ReValue-AI-Prototype-v1.16.1-predeployment-preview.html"
@@ -107,7 +107,7 @@ def _cleanup_sessions() -> None:
 
 def _new_session(origin: str) -> dict[str, Any]:
     _cleanup_sessions()
-    token = f"RVA-LIVE-{secrets.token_hex(4).upper()}"
+    token = f"RVA-LIVE-{secrets.token_urlsafe(18)}"
     now = time.time()
     session = {
         "session_id": token,
@@ -195,7 +195,7 @@ button{{width:100%;border:0;border-radius:16px;padding:15px 16px;margin-top:11px
   <div class="eyebrow">REMOTE CAMERA</div>
   <h1>Exterior Scan</h1>
   <section class="card" id="captureCard">
-    <div class="stage" id="stage">1 of 5 Â· Front</div>
+    <div class="stage" id="stage">1 of 5 · Front</div>
     <div class="progress" id="progress"></div>
     <div class="camera" id="cameraBox"><div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div></div>
     <input id="fileInput" type="file" accept="image/*" capture="environment">
@@ -210,7 +210,7 @@ const SESSION_ID={json.dumps(token)};
 const VIEWS={json.dumps(REMOTE_VIEWS)};
 const LABELS={labels};
 let current=0, pending=null;
-function render(){{document.getElementById('stage').textContent=`${{Math.min(current+1,VIEWS.length)}} of ${{VIEWS.length}} Â· ${{LABELS[VIEWS[current]]||''}}`;document.getElementById('progress').innerHTML=VIEWS.map((v,i)=>`<i class="dot ${{i<current?'done':i===current?'current':''}}"></i>`).join('');document.getElementById('sendBtn').style.display=current>=VIEWS.length?'block':'none'}}
+function render(){{document.getElementById('stage').textContent=current<VIEWS.length?`${{current+1}} of ${{VIEWS.length}} · ${{LABELS[VIEWS[current]]}}`:'All five views ready';document.getElementById('progress').innerHTML=VIEWS.map((v,i)=>`<i class="dot ${{i<current?'done':i===current?'current':''}}"></i>`).join('');document.getElementById('sendBtn').style.display=current>=VIEWS.length?'block':'none'}}
 function openCamera(){{if(posting||current>=VIEWS.length)return;document.getElementById('fileInput').click()}}
 document.getElementById('fileInput').addEventListener('change',e=>{{const file=e.target.files&&e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{{pending={{name:file.name,type:file.type||'image/jpeg',data:String(reader.result)}};document.getElementById('cameraBox').innerHTML=`<img src="${{pending.data}}" alt="Preview"><div class="guide"></div>`;document.getElementById('previewActions').style.display='grid'}};reader.onerror=()=>alert('Could not read the image. Please try another photo.');reader.readAsDataURL(file)}});
 function retake(){{pending=null;document.getElementById('previewActions').style.display='none';document.getElementById('cameraBox').innerHTML='<div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div>';document.getElementById('fileInput').value=''}}
@@ -421,7 +421,15 @@ class ReValueHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 _json_response(self, 400, {"status": "error", "error": str(exc)})
                 return
-            result = analyze_exterior(images)
+            device = None
+            if "confirmed_device" in payload:
+                ok, error, device = canonicalize_confirmed_device(payload["confirmed_device"])
+                if not ok:
+                    _json_response(self, 400, {"status": "error", "error": error})
+                    return
+            result = analyze_exterior(images, run_gemini_verification=payload.get("verify_with_gemini", True) is True)
+            if device and result["status"] == "ok" and result["assessment_basis"] in PRICEABLE_BASES:
+                result["assessment_receipt"] = issue_receipt(device, result["grade"]["exterior_grade"], result["assessment_basis"])
             status = {"error": 400, "blocked": 503}.get(result["status"], 200)
             _json_response(self, status, result)
             return
@@ -461,96 +469,32 @@ class ReValueHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/live-valuation":
-            confirmed_device = payload.get("confirmed_device")
-            exterior_grade = payload.get("exterior_grade")
-            if not normalize_exterior_grade(exterior_grade):
+            grade = normalize_exterior_grade(payload.get("exterior_grade"))
+            if not grade:
                 _json_response(self, 200, exterior_grade_error_response())
                 return
-            if not confirmed_device:
-                _json_response(
-                    self,
-                    200,
-                    {
-                        "status": "error",
-                        "currency": "MYR",
-                        "value_low": None,
-                        "value_high": None,
-                        "midpoint": None,
-                        "exact_model_count": 0,
-                        "condition_matched_count": 0,
-                        "evidence_status": "error",
-                        "distribution": {},
-                        "trade_in_benchmark": [],
-                        "repair_references": [],
-                        "sources": [],
-                        "limitations": ["Public live valuation requires confirmed_device and exterior_grade."],
-                        "retryable": False,
-                        "error": "confirmed_device_required",
-                    },
-                )
+            ok, error, device = canonicalize_confirmed_device(payload.get("confirmed_device"))
+            if not ok or device is None:
+                _json_response(self, 200, {"status": "error", "error": error, "value_low": None, "value_high": None})
                 return
-
-            market_evidence = retrieve_current_market_evidence(
-                confirmed_device=confirmed_device,
-                exterior_grade=exterior_grade,
-            )
-            if market_evidence.get("status") != "ok" or not market_evidence.get("market_observations"):
-                if market_evidence.get("error") not in {
-                    "confirmed_device_required",
-                    "catalogue_id_required",
-                    "storage_required",
-                    "catalogue_id_not_found",
-                    "confirmed_device_identity_mismatch",
-                    "storage_confirmation_required",
-                    "valid_exterior_grade_required",
-                }:
-                    fallback_device = market_evidence.get("query_device") or confirmed_device
-                    fallback = local_fallback_valuation(
-                        confirmed_device=fallback_device,
-                        exterior_grade=str(exterior_grade),
-                        fallback_reason=str(market_evidence.get("status") or market_evidence.get("error") or "live_retrieval_unavailable"),
-                    )
-                    fallback["live_retrieval_status"] = market_evidence.get("status")
-                    fallback["live_retrieval_error"] = market_evidence.get("error")
-                    _json_response(self, 200, fallback)
+            valuation_basis = payload.get("valuation_basis", "manual_grade")
+            if valuation_basis == "exterior_scan":
+                assessment_basis = verify_receipt(payload.get("assessment_receipt"), device, grade)
+                if not assessment_basis:
+                    _json_response(self, 409, {
+                        "status": "pending", "error": "Scan evidence is missing or expired. Re-run the exterior scan.",
+                        "value_low": None, "value_high": None,
+                    })
                     return
-                _json_response(
-                    self,
-                    200,
-                    {
-                        "status": market_evidence.get("status"),
-                        "currency": "MYR",
-                        "value_low": None,
-                        "value_high": None,
-                        "midpoint": None,
-                        "exact_model_count": 0,
-                        "condition_matched_count": 0,
-                        "evidence_status": market_evidence.get("status"),
-                        "distribution": {},
-                        "trade_in_benchmark": market_evidence.get("trade_in_benchmarks", []),
-                        "repair_references": market_evidence.get("repair_references", []),
-                        "sources": [],
-                        "limitations": market_evidence.get("notes", []),
-                        "retryable": market_evidence.get("retryable", False),
-                        "error": market_evidence.get("error"),
-                        "grounded_sources": market_evidence.get("grounded_sources", []),
-                    },
-                )
+            elif valuation_basis == "manual_grade":
+                assessment_basis = "manual_grade"
+            else:
+                _json_response(self, 400, {"status": "error", "error": "Unknown valuation basis."})
                 return
-            query_device = market_evidence.get("query_device") or confirmed_device or {}
-            storage_gb = parse_storage_gb(query_device.get("storage"))
-            result = value_from_market_observations(
-                observations=market_evidence.get("market_observations", []),
-                brand=query_device.get("brand", ""),
-                model=query_device.get("model", ""),
-                storage_gb=storage_gb,
-                condition_group=market_evidence.get("condition_group"),
-                trade_in_benchmark=market_evidence.get("trade_in_benchmarks", []),
-                repair_references=market_evidence.get("repair_references", []),
-            )
-            payload_result = asdict(result)
-            payload_result["grounded_sources"] = market_evidence.get("grounded_sources", [])
-            _json_response(self, 200, payload_result)
+            market = retrieve_current_market_evidence(confirmed_device=device, exterior_grade=grade)
+            result = build_live_estimate(device, grade, market)
+            result["assessment_basis"] = assessment_basis
+            _json_response(self, 200, result)
             return
 
         _json_response(self, 404, {"error": "not_found"})
