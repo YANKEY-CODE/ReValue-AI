@@ -1,5 +1,7 @@
 # ReValue AI Real Phone Catalogue v0.2
 
+[Continue this project in Codex Local on Windows](HANDOFF.md).
+
 To run the app on a Windows laptop, see [Windows installation and launch](WINDOWS_SETUP.md). For FYP1 verification and evaluation, see the [FYP development guide](fyp/README.md).
 
 To prepare a protected HTTPS demonstration for a supervisor, see [deployment and verification](DEPLOYMENT.md).
