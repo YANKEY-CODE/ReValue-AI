@@ -1,5 +1,7 @@
 # ReValue UI redesign V2
 
+[Desktop before and after](design-review/desktop.jpg) · [Mobile before and after](design-review/mobile.jpg)
+
 ## Design and implementation
 
 The starting point for V2 was `602828c` on `fyp1-development`. The previous screen used the same bordered container for the introduction, instructions and controls. On wide screens, the capture heading and the five-photo strip followed different alignment guides. The catalogue and report also used nearly the same visual hierarchy despite supporting different decisions.
@@ -48,8 +50,8 @@ The assessment opens at [127.0.0.1:8765](http://127.0.0.1:8765) and the comparis
 
 - Chromium on Linux exercised catalogue validation and filtering, device storage, five validated images, scan failure and review-required fixtures, real YOLO11n CPU inference, QR capture, quotes, a live report and the print stylesheet. Chromium printed the fixture-based real-inference report to a one-page A4 PDF.
 - The comparison smoke exercised real CPU predictions and both downloads. Controlled output fixtures covered bounding-box position and class labels, hiding boxes, restoring them, zoom, dialog focus and CSV escaping.
-- The local HTTPS supervisor smoke checked anonymous denial, authenticated access, sanitized uploads, real inference and reports on desktop and an emulated phone. Windows, physical camera hardware and public hosting were outside these checks.
-- The backend suite passed 69 tests and 5 subtests with real inference enabled. The self-test and JavaScript decision-support checks passed. The five comparison tests, two evaluator tests and thirteen benchmark-preparation tests passed in separate Python processes. Running all those FYP suites together exposed a pre-existing interaction between Ultralytics' global Pillow patch and the corrupt-image import test when optional `pi_heif` is absent.
+- The local Docker build used the cloud proxy CA as a transient BuildKit secret during dependency installation. The container included the additional stylesheet. Running the same supervisor smoke directly and through a local TLS proxy to that container checked anonymous denial, authenticated access, sanitized uploads, real inference and reports on desktop and an emulated phone. Windows, physical camera hardware and public hosting were outside these checks.
+- The backend suite passed 69 tests and 5 subtests with real inference enabled. The self-test and JavaScript decision-support checks passed. The five comparison tests, two evaluator tests and thirteen benchmark-preparation tests passed in separate Python processes. Running all those FYP suites together exposed a pre-existing interaction between Ultralytics' global Pillow patch and the corrupt-image import test when optional `pi_heif` is absent. All 20 tests also passed in one process with `pi-heif==1.4.0` present in a temporary test directory.
 - Before and after screenshots cover nine screens at 1440, 768 and 390 CSS pixels wide. Assessment photos are synthetic software inputs. The comparison-result screenshot uses the attributed Broken Interfaces display crop described below. Screenshot overlays are qualitative. No accuracy benchmark was run.
 
 ## Browser test coverage
