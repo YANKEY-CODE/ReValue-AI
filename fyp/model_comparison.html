@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ReValue AI | Qualitative model comparison</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #172229; background: #f2f6f5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 1320px; margin: auto; padding: 32px clamp(16px, 4vw, 48px); }
+    h1 { font-size: clamp(1.65rem, 4vw, 2.7rem); line-height: 1.1; margin: 0 0 .75rem; }
+    h2, h3 { margin: 0 0 .75rem; }
+    p { line-height: 1.5; margin: .5rem 0; }
+    .intro { max-width: 68ch; color: #344e54; }
+    .controls, article { background: #fff; border: 1px solid #c8d8d7; border-radius: 14px; padding: 20px; margin-top: 20px; }
+    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    label { font-weight: 650; display: block; margin-bottom: 8px; }
+    input { max-width: 100%; }
+    button { font: inherit; border: 1px solid #066451; border-radius: 8px; padding: 8px 14px; background: #fff; color: #13453b; font-weight: 650; cursor: pointer; }
+    button[type=submit] { background: #066451; color: #fff; }
+    button:disabled { opacity: .55; cursor: default; }
+    :focus-visible { outline: 3px solid #3e65ce; outline-offset: 3px; }
+    .panel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .panel { min-width: 0; border: 1px solid #e0e9e7; padding: 12px; border-radius: 10px; }
+    .panel h3 { font-size: 1rem; min-height: 2.5em; }
+    .photo { position: relative; background: #23383c; }
+    .photo img { width: 100%; height: 100%; display: block; object-fit: fill; }
+    .overlay { position: absolute; inset: 0; }
+    .box { position: absolute; border: 2px solid var(--box, #fff); }
+    .box[data-class=generic_crack] { --box: #ffd45b; }
+    .box[data-class=scratch] { --box: #59ecd4; }
+    .box[data-class=bump] { --box: #bfcbff; }
+    .box[data-class=paint] { --box: #ffafd6; }
+    .box span { position: absolute; top: 0; left: 0; font-size: .72rem; line-height: 1.2; padding: 2px 4px; white-space: nowrap; background: #101e25; color: var(--box); }
+    .counts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .counts span { background: #e3f2ed; padding: 3px 7px; border-radius: 5px; font-size: .88rem; }
+    .timing, .detections { font-size: .89rem; }
+    .detections { padding-left: 20px; margin-bottom: 0; }
+    .detections li { margin: 4px 0; }
+    .error { color: #9b1d31; }
+    article h2 { font-size: 1.15rem; overflow-wrap: anywhere; }
+    @media (max-width: 760px) {
+      .panel-grid { grid-template-columns: 1fr; }
+      .panel h3 { min-height: 0; }
+    }
+  </style>
+  <script defer src="/model_comparison.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Qualitative model comparison</h1>
+      <p class="intro">Compare ReValue YOLO11n and experimental Houdan YOLO11s on the same smartphone photos. Boxes and counts are model predictions. Accuracy requires independently verified annotations.</p>
+    </header>
+    <form id="compare-form" class="controls">
+      <label for="photos">Smartphone photos</label>
+      <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple required>
+      <p>Select up to 20 JPEG, PNG or WebP photos, each up to 8 MiB and 16 megapixels. Photos are processed locally.</p>
+      <p id="settings"></p>
+      <div class="toolbar">
+        <button id="compare" type="submit" disabled>Compare photos</button>
+        <button id="csv" type="button" disabled>Export CSV</button>
+        <button id="json" type="button" disabled>Export JSON</button>
+      </div>
+      <p id="status" role="status">Connecting to the local comparison…</p>
+    </form>
+    <section id="results" aria-label="Comparison results"></section>
+  </main>
+</body>
+</html>

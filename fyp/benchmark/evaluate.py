@@ -4,7 +4,6 @@ import argparse
 from collections import Counter
 import csv
 from datetime import datetime, timezone
-from importlib import import_module
 import os
 from pathlib import Path
 import platform
@@ -13,45 +12,18 @@ from time import perf_counter
 import cv2
 import numpy as np
 
+from checkpoints import BUNDLED_SHA, HOUDAN_SHA, load_houdan
 from dataset import (
     CLASSES, REPO, SPLITS, approved_annotation, benchmark_coverage, digest,
     key, label_text, private_path, read_json, validate_annotation, write_json,
 )
 
-HOUDAN_SHA = "c2c32004a2bbfae390fe439e01a1bdd00fed4ad21270b9cf2caedd5f0e0bf26c"
-BUNDLED_SHA = "b26c49987eb44ab60ba0368420b5aa6fa89462b72212d5a83773aabc9a1d543f"
 NAMES = dict(enumerate(CLASSES))
 IOU_LEVELS = np.arange(50, 100, 5) / 100
 AP_FLOOR = .001
 CONFIDENCE = .25
 SETTINGS = {"imgsz": 640, "device": "cpu", "conf": AP_FLOOR, "iou": .7, "max_det": 300,
             "rect": False, "quantize": 32, "verbose": False, "save": False}
-
-
-def load_houdan(weights, YOLO, torch):
-    allowed = {
-        "torch.nn.modules.linear": ("Identity",),
-        "torch.nn.modules.pooling": ("MaxPool2d",),
-        "torch.nn.modules.conv": ("Conv2d",),
-        "torch.nn.modules.upsampling": ("Upsample",),
-        "torch.nn.modules.batchnorm": ("BatchNorm2d",),
-        "torch.nn.modules.activation": ("SiLU",),
-        "torch.nn.modules.container": ("Sequential", "ModuleList"),
-        "ultralytics.nn.tasks": ("DetectionModel",),
-        "ultralytics.nn.modules.block": ("DFL", "Attention", "SPPF", "Bottleneck", "PSABlock", "C2PSA", "C3k2", "C3k"),
-        "ultralytics.nn.modules.conv": ("Concat", "DWConv", "Conv"),
-        "ultralytics.nn.modules.head": ("Detect",),
-    }
-    if digest(weights) != HOUDAN_SHA:
-        raise ValueError("Houdan checkpoint does not match the approved release SHA-256.")
-    approved = [getattr(import_module(module), name) for module, names in allowed.items() for name in names]
-    with torch.serialization.safe_globals([*approved, set]):
-        checkpoint = torch.load(weights, weights_only=True, map_location="cpu")
-    wrapper = YOLO("yolo11s.yaml", task="detect", verbose=False)
-    wrapper.model = (checkpoint.get("ema") or checkpoint["model"]).float().eval()
-    if wrapper.names != {0: "scratch", 1: "bump", 2: "paint", 3: "crack"}:
-        raise ValueError("Houdan's class order differs from the verified checkpoint.")
-    return wrapper
 
 
 def match(targets, predictions, iou_threshold):

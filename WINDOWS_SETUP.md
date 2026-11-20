@@ -59,3 +59,5 @@ Use the launcher in your chosen project folder if you used `-ProjectPath`. Run i
 ## Verification status
 
 The Windows x64 wheels resolved for Python 3.12. PowerShell on Linux verified the checkout and launcher flow with a simulated Windows executable layout, real CPU inference, and local HTTP responses. Native Windows installation and browser opening still need a laptop test.
+
+For side-by-side predictions on your own photos, see the [separate local model comparison](fyp/MODEL_COMPARISON.md).
