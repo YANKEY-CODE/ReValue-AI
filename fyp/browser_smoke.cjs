@@ -11,7 +11,11 @@ async function selectPhone(page, mode) {
   assert.equal(await page.locator('#scanPage').evaluate(node => document.activeElement === node), true);
   await page.getByRole('button', { name: 'Start Phone Assessment' }).click();
   await page.getByRole('button', { name: mode }).click();
+  const brand = page.getByRole('button', { name: 'Apple', exact: true });
+  await brand.click();
+  assert.equal(await brand.getAttribute('aria-pressed'), 'true');
   await page.getByLabel('Brand or model').fill('zzzz-nonexistent-zzzz');
+  assert.equal(await brand.getAttribute('aria-pressed'), 'false');
   await page.getByText('No matching models.', { exact: false }).waitFor();
   await page.getByPlaceholder('Search brand or model').fill('iPhone 13 Pro');
   await page.locator('.catalogue-result').filter({ hasText: 'Apple iPhone 13 Pro' }).first().click();
@@ -125,12 +129,14 @@ async function selectPhone(page, mode) {
     await page.route('**/live-valuation', route => route.fulfill({ status: 503, json: { error: 'Software fixture outage' } }));
     await page.route(scanUrl, route => route.fulfill({ json: { status: 'ok', assessment_basis: 'provisional',
       yolo_model: 'revalue_exterior_yolo11n_v0.2', grade: { exterior_grade: 'A', note: 'Software fixture' },
-      detections: [], merged_damage: [], assessment_receipt: 'software-fixture' } }));
+      detections: [{ raw_class: 'scratch', view: 'back', confidence: .77, bounding_box_xyxy: [10, 10, 45, 35] }],
+      merged_damage: [], assessment_receipt: 'software-fixture' } }));
     await page.evaluate(() => showPage('scan'));
     await analyze.click();
     await report.click();
     assert.equal(await page.locator('#estimatedValue').textContent(), 'Market estimate unavailable');
     assert.equal(await page.locator('#marketState').textContent(), 'Valuation request failed');
+    assert.match(await page.locator('#reportDetections li').textContent(), /scratchBack77.0% model score/i);
     await page.unroute('**/live-valuation');
     await page.unroute(scanUrl);
 

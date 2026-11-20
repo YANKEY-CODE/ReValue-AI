@@ -1056,7 +1056,7 @@ window.updateReport=function(){
   observations.hidden = candidates.length === 0;
   observations.innerHTML = candidates.length ? `<h3>Visible damage candidates</h3><ul>${candidates.map(item => {
     const view = requiredViews.find(entry => entry.id === item.view);
-    return `<li><b>${escapeHtml(damageName(item.raw_class))}</b><span>${escapeHtml(view?.label || item.view)}</span><span>${formatConfidence(item.confidence)} model score</span></li>`;
+    return `<li><b>${escapeHtml(damageName(item.raw_class))}</b><span>${escapeHtml(view?.label || item.view)}</span><span>${Number.isFinite(item.confidence) ? formatConfidence(item.confidence) + ' model score' : 'Score unavailable'}</span></li>`;
   }).join('')}</ul>` : '';
   document.getElementById('reportScoreCard').hidden=live;
   document.getElementById('marketBasis').textContent=live

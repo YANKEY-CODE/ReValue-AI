@@ -147,8 +147,9 @@ input[type=checkbox] { accent-color: var(--rv-accent); width: 17px; height: 17px
 .guide-front { background: #565550; box-shadow: inset 0 0 0 3px #e0dcd1; }
 .guide-front::after { inset: 8% 35% auto; height: 3px; border-radius: 3px; background: #eee9df; }
 .guide-back::after, .guide-camera::after { top: 8%; left: 10%; width: 31%; aspect-ratio: 1; border: 2px solid #514b43; border-radius: 50%; box-shadow: 0 9px 0 -1px #514b43; }
-.guide-camera { width: 42%; height: 69%; border-radius: 18%; }
-.guide-camera::after { width: 28%; top: 16%; left: 15%; box-shadow: 1.1em .5em 0 0 #514b43, 0 1.2em 0 -1px #514b43; }
+.guide-camera { width: auto; height: 65%; aspect-ratio: 1; border-radius: 18%; }
+.guide-camera::after { width: 28%; top: 16%; left: 15%; box-shadow: none; background: radial-gradient(circle, #333 34%, #aaa 38%, #444 50%); }
+.guide-camera::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 70% 49%, #3e3a35 12%, transparent 14%), radial-gradient(circle at 30% 72%, #3e3a35 12%, transparent 14%); }
 .guide-left_side, .guide-right_side { width: 6%; border-radius: 5px; }
 .guide-left_side::after, .guide-right_side::after { top: 25%; left: -4px; height: 23%; width: 2px; background: #554f46; }
 .guide-right_side::after { left: auto; right: -4px; }
@@ -156,7 +157,18 @@ input[type=checkbox] { accent-color: var(--rv-accent); width: 17px; height: 17px
 .scan-result { border-left: 4px solid var(--rv-ink); }
 .scan-result.review-required { border-left-color: var(--rv-warning); }
 /* Report, demonstration and local shop tools */
-#reportPage { max-width: 920px; }
+#reportPage { max-width: 1040px; }
+#reportPage .hero { border-bottom: 1px solid var(--rv-ink); padding-bottom: 18px; }
+#reportPage .report-title h2 { font: 400 clamp(1.65rem, 3.6vw, 2.7rem)/1.12 var(--rv-display); }
+@media screen and (min-width: 901px) {
+  #reportPage.active {
+    display: grid; grid-template-columns: 1.08fr 1fr; gap: 16px 20px; align-items: start;
+  }
+  #reportPage > :is(.hero,.flow-back) { grid-column: 1 / -1; justify-self: start; }
+  #reportPage > .hero { justify-self: stretch; }
+  #reportPending { grid-column: 1 / -1; }
+  #reportPage > .card { margin: 0; }
+}
 .report-hero { background: white; border-top: 4px solid var(--rv-ink); }
 .report-observations { margin: 18px 0; }
 .report-observations ul { list-style: none; margin: 8px 0; padding: 0; }
