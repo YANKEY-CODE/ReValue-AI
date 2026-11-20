@@ -159,6 +159,10 @@ function appendPredictionDetails(container, report) {
 }
 
 function openInspection(trigger, title, jpeg, image, report) {
+  const boxes = document.getElementById('show-boxes');
+  boxes.checked = true;
+  boxes.parentElement.hidden = !report?.detections.length;
+  zoomArea.classList.remove('hide-boxes');
   inspectorTrigger = trigger;
   zoom = 1;
   inspected = renderPhoto(title, jpeg, image, report);
@@ -185,6 +189,9 @@ function sizeInspection() {
 zoomOut.addEventListener('click', () => { zoom = Math.max(1, zoom - .25); sizeInspection(); });
 zoomIn.addEventListener('click', () => { zoom = Math.min(3, zoom + .25); sizeInspection(); });
 closeInspection.addEventListener('click', () => dialog.close());
+document.getElementById('show-boxes').addEventListener('change', event => {
+  zoomArea.classList.toggle('hide-boxes', !event.target.checked);
+});
 dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
 dialog.addEventListener('close', () => {
   zoomArea.replaceChildren();
