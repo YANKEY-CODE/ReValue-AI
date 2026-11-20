@@ -24,7 +24,7 @@ MAX_FORM_BYTES = 16 * 1024
 EXPECTED_MODEL_SHA256 = "b26c49987eb44ab60ba0368420b5aa6fa89462b72212d5a83773aabc9a1d543f"
 POST_ROUTES = {"/confirm-device", "/analyze-exterior", "/live-valuation"}
 READ_ROUTES = {
-    "/", "/app", "/catalogue/search", "/decision-support.js", "/revalue-design.css", "/revalue-professional.css",
+    "/", "/app", "/catalogue/search", "/decision-support.js", "/revalue-design.css", "/revalue-professional.css", "/revalue-legacy.css",
     "/revalue-phone-studio.jpg", "/iphone13pro_back_damage.jpg", "/samsung_s23_ultra_back_damage.jpg",
     "/shop_ecophone.jpg", "/shop_fastfix.jpg", "/shop_greentech.jpg", "/shop_kl_mobile_repair.jpg", "/shop_valuemax.jpg",
 }

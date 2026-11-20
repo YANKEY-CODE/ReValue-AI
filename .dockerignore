@@ -3,6 +3,7 @@
 !app/
 !app/ReValue-AI-Prototype-v1.16.1-predeployment-preview.html
 !app/decision-support.js
+!app/revalue-legacy.css
 !app/revalue-design.css
 !app/revalue-professional.css
 !app/revalue-phone-studio.jpg

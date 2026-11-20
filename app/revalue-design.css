@@ -1,20 +1,24 @@
 :root {
   color-scheme: light;
-  --rv-bg: #f6f8f5;
+  --rv-display: 'Baskervville', 'Bitstream Charter', Georgia, serif;
+  --rv-mono: 'IBM Plex Mono', Consolas, monospace;
+  --rv-orange: #e78142;
+  --rv-paper: #f8f6ef;
+  --rv-bg: #f8f6ef;
   --rv-surface: #fff;
-  --rv-soft: #edf4ef;
-  --rv-ink: #142923;
-  --rv-muted: #4c6258;
-  --rv-border: #d3dfd7;
-  --rv-accent: #14543e;
-  --rv-accent-hover: #0e422f;
+  --rv-soft: #efede5;
+  --rv-ink: #22211f;
+  --rv-muted: #5a564f;
+  --rv-border: #d2cdc1;
+  --rv-accent: #292725;
+  --rv-accent-hover: #48413a;
   --rv-focus: #275fc1;
   --rv-error: #8b2d35;
   --rv-error-bg: #fff1f0;
   --rv-warning: #684300;
   --rv-warning-bg: #fcf5e3;
-  --rv-radius: 14px;
-  --rv-shadow: 0 12px 32px rgba(20, 50, 36, .06);
+  --rv-radius: 6px;
+  --rv-shadow: none;
   font: 16px/1.55 'Segoe UI', system-ui, sans-serif;
   color: var(--rv-ink);
   background: var(--rv-bg);
@@ -31,10 +35,10 @@ a { color: var(--rv-accent); }
 h1, h2, h3 { line-height: 1.16; margin: 0; }
 p { margin: 0; }
 
-.rv-header { background: var(--rv-surface); border-bottom: 1px solid var(--rv-border); }
+.rv-header { background: var(--rv-paper); border-bottom: 1px solid var(--rv-border); }
 .rv-header-inner { width: min(100% - 40px, 1200px); min-height: 68px; margin: auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.rv-brand { display: inline-flex; gap: 10px; align-items: center; flex: none; color: var(--rv-ink); font-size: 1.15rem; font-weight: 750; text-decoration: none; letter-spacing: -.035em; }
-.rv-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: white; background: var(--rv-accent); }
+.rv-brand { display: inline-flex; gap: 10px; align-items: center; flex: none; color: var(--rv-ink); font: bold 1.65rem/1 var(--rv-display); text-decoration: none; letter-spacing: -.035em; }
+.rv-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: var(--rv-ink); background: var(--rv-orange); }
 .rv-mark svg { width: 22px; height: 22px; }
 .rv-context { color: var(--rv-muted); font-size: .8rem; }
 .rv-eyebrow { color: var(--rv-accent); font-size: .75rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
