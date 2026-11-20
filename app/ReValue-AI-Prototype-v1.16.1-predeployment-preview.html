@@ -566,6 +566,7 @@ renderLiveExterior();renderExteriorFindings();renderDiag();updateDiagProgress();
 (function(){
 const legacy={showPage,renderAssessmentGates,updateReport,renderShops,renderChatsList,renderLiveExterior,chooseAssessmentMode,selectDevice};
 const originalScanHtml=document.getElementById('scanPage').innerHTML;
+const supervisorDemo=document.documentElement.hasAttribute('data-supervisor-demo');
 const API_BASE=location.protocol==='file:'?'http://127.0.0.1:8765':location.origin;
 const requiredViews=[
   {id:'front',label:'Front',tip:'Full display, straight on',icon:'phone'},
@@ -648,7 +649,7 @@ window.openAssessmentChooser=function(){
   finalState.step='choose';
   document.getElementById('scanPage').innerHTML=`<section class="hero scan-hero workflow"><h1>Choose a capture method</h1><p>Select the phone you want to assess.</p></section>
     <section class="card narrow-flow"><div class="final-home-grid">
-      <button class="final-card-button" type="button" onclick="startFinalFlow('self')">${icon('phone')}<b>Value This Phone</b><span>Upload photos or use a QR link to capture them on another device.</span></button>
+      <button class="final-card-button" type="button" onclick="startFinalFlow('self')">${icon('phone')}<b>Value This Phone</b><span>${supervisorDemo?'Upload photos from this device.':'Upload photos or use a QR link to capture them on another device.'}</span></button>
       <button class="final-card-button" type="button" onclick="startFinalFlow('other')">${icon('camera')}<b>Value Another Phone</b><span>Upload photos or use this device’s camera.</span></button>
     </div></section>`;
   syncFlowBackControls();
@@ -794,7 +795,7 @@ function renderFinalScanner(){
       <button class="primary" type="button" onclick="analyzeFinalExterior()" ${n!==total||finalState.processing?'disabled':''}>${finalState.processing?'Analyzing…':'Analyze Exterior'}</button>
       <button class="secondary" type="button" onclick="triggerNextPhoto()" ${finalState.processing?'disabled':''}>Open camera</button>
     </div>
-    <label class="capture-privacy"><input id="verifyWithGemini" type="checkbox" ${finalState.verifyWithGemini?'checked':''} ${finalState.processing?'disabled':''} onchange="setGeminiVerification(this.checked)"> Send photos to Gemini for optional verification</label>
+    ${supervisorDemo?'<p class="capture-privacy">Photos are resized on your device and used for this assessment. The server does not save them.</p>':`<label class="capture-privacy"><input id="verifyWithGemini" type="checkbox" ${finalState.verifyWithGemini?'checked':''} ${finalState.processing?'disabled':''} onchange="setGeminiVerification(this.checked)"> Send photos to Gemini for optional verification</label>`}
     ${finalState.flowError?`<p class="rv-alert field-feedback" role="alert">${escapeHtml(finalState.flowError)}</p>`:''}
     ${renderRemoteBox()}
   </section>${renderHiddenInputs()}`;
@@ -853,23 +854,45 @@ window.handleFinalPhoto=function(id,input){
   const reader=new FileReader();
   reader.onerror=()=>fail('This photo could not be read. Try another file.');
   reader.onload=()=>{
-    const encoded=String(reader.result).split(',')[1],img=new Image();
+    const img=new Image();
     img.onerror=reader.onerror;
     img.onload=()=>{
       if(!stillCurrent()||finalState.processing)return;
       if(img.naturalWidth*img.naturalHeight>16000000){fail('Choose an image up to 16 megapixels.');return}
+      const upload=supervisorDemo?makeDemoUpload(img):{dataUrl:img.src,width:img.naturalWidth,height:img.naturalHeight,mime_type:mime};
+      if(!upload){fail('This photo could not be resized. Try another file.');return}
+      const encoded=upload.dataUrl.split(',')[1];
       if(Object.entries(finalState.photos).some(([view,photo])=>view!==id&&photo.bytes_b64===encoded)){
         fail('Use a different photo for each view.');return;
       }
       invalidateExterior();delete finalState.photoErrors[id];
-      finalState.photos[id]={name:file.name,mime_type:mime,bytes_b64:encoded,dataUrl:img.src,width:img.naturalWidth,height:img.naturalHeight,source:'local'};
+      finalState.photos[id]={...upload,name:file.name,bytes_b64:encoded,source:'local'};
       renderPhotoFeedback(id);renderAssessmentGates();
     };
-    img.src=`data:${mime};base64,${encoded}`;
+    img.src=`data:${mime};base64,${String(reader.result).split(',')[1]}`;
   };
   reader.readAsDataURL(file);
 };
 
+function makeDemoUpload(img){
+  const canvas=document.createElement('canvas');
+  const scale=Math.min(1,2048/Math.max(img.naturalWidth,img.naturalHeight));
+  canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+  canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+  const context=canvas.getContext('2d');
+  if(!context)return null;
+  context.fillStyle='#fff';
+  context.fillRect(0,0,canvas.width,canvas.height);
+  context.drawImage(img,0,0,canvas.width,canvas.height);
+  // Export only the upright image pixels. The input's EXIF and filename are not uploaded.
+  for(const quality of [.88,.7,.5]){
+    const dataUrl=canvas.toDataURL('image/jpeg',quality);
+    const encoded=dataUrl.split(',')[1]||'';
+    const padding=encoded.endsWith('==')?2:Number(encoded.endsWith('='));
+    if(encoded&&encoded.length*3/4-padding<=2*1024*1024)return {dataUrl,width:canvas.width,height:canvas.height,mime_type:'image/jpeg'};
+  }
+  return null;
+}
 window.createRemoteSession=async function(){
   const revision=scanRevision;
   try{
@@ -880,7 +903,7 @@ window.createRemoteSession=async function(){
     renderFinalScanner();
   }catch(error){toast(error.message)}
 };
-function renderRemoteBox(){if(finalState.target!=='self')return '';if(!finalState.session)return `<div class="remote-box"><b>Scan with another device</b><p class="helper-line">Open a camera page on another phone.</p><button class="secondary" type="button" onclick="createRemoteSession()">Create QR + Link</button></div>`;return `<div class="remote-box"><div class="remote-qr"><img loading="lazy" decoding="async" src="${API_BASE}/remote-session/${encodeURIComponent(finalState.session.session_id)}/qr.svg" alt="Scan session QR"></div><input class="remote-link" id="remoteLink" value="${escapeHtml(finalState.session.session_url)}" readonly><div class="final-actions"><button class="secondary" type="button" onclick="copyRemoteLink()">Copy Link</button><button class="primary" type="button" onclick="shareRemoteLink()">Share Link</button></div></div>`}
+function renderRemoteBox(){if(supervisorDemo||finalState.target!=='self')return '';if(!finalState.session)return `<div class="remote-box"><b>Scan with another device</b><p class="helper-line">Open a camera page on another phone.</p><button class="secondary" type="button" onclick="createRemoteSession()">Create QR + Link</button></div>`;return `<div class="remote-box"><div class="remote-qr"><img loading="lazy" decoding="async" src="${API_BASE}/remote-session/${encodeURIComponent(finalState.session.session_id)}/qr.svg" alt="Scan session QR"></div><input class="remote-link" id="remoteLink" value="${escapeHtml(finalState.session.session_url)}" readonly><div class="final-actions"><button class="secondary" type="button" onclick="copyRemoteLink()">Copy Link</button><button class="primary" type="button" onclick="shareRemoteLink()">Share Link</button></div></div>`}
 window.copyRemoteLink=function(){const u=finalState.session?.session_url||'';navigator.clipboard?.writeText(u).then(()=>toast('Link copied')).catch(()=>toast('Copy link manually'))}
 window.shareRemoteLink=function(){const u=finalState.session?.session_url||'';if(navigator.share)navigator.share({title:'ReValue AI Exterior Scan',url:u}).catch(()=>copyRemoteLink());else copyRemoteLink()}
 function startFinalPoll(){stopFinalPoll();if(document.hidden)return;finalState.poll=setInterval(pollRemoteSession,1800);pollRemoteSession()}
@@ -938,7 +961,7 @@ window.analyzeFinalExterior=async function(){
   renderAssessmentGates();
   const images=requiredViews.map(({id})=>{
     const photo=finalState.photos[id];
-    return {view:id,filename:photo.name,mime_type:photo.mime_type,bytes_b64:photo.bytes_b64};
+    return {view:id,filename:supervisorDemo?id+'.jpg':photo.name,mime_type:photo.mime_type,bytes_b64:photo.bytes_b64};
   });
   try{
     const analysis=await api('/analyze-exterior',{method:'POST',body:JSON.stringify({images,confirmed_device:finalState.confirmedDevice,verify_with_gemini:finalState.verifyWithGemini})});

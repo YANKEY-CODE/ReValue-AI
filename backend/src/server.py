@@ -246,6 +246,8 @@ render();
 
 
 class ReValueHandler(BaseHTTPRequestHandler):
+    allow_external_photo_verification = True
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0:
@@ -425,7 +427,10 @@ class ReValueHandler(BaseHTTPRequestHandler):
                 if not ok:
                     _json_response(self, 400, {"status": "error", "error": error})
                     return
-            result = analyze_exterior(images, run_gemini_verification=payload.get("verify_with_gemini", True) is True)
+            result = analyze_exterior(
+                images, run_gemini_verification=(self.allow_external_photo_verification
+                                                 and payload.get("verify_with_gemini", True) is True),
+            )
             if device and result["status"] == "ok" and result["assessment_basis"] in PRICEABLE_BASES:
                 result["assessment_receipt"] = issue_receipt(device, result["grade"]["exterior_grade"], result["assessment_basis"])
             status = {"error": 400, "blocked": 503}.get(result["status"], 200)
