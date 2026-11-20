@@ -5,11 +5,20 @@ const baseUrl = process.env.REVALUE_SMOKE_URL || 'http://127.0.0.1:8765';
 
 async function selectPhone(page, mode) {
   await page.goto(baseUrl);
+  await page.keyboard.press('Tab');
+  assert.equal(await page.getByRole('link', { name: 'Skip to content' }).evaluate(node => document.activeElement === node), true);
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#scanPage').evaluate(node => document.activeElement === node), true);
+  await page.getByRole('button', { name: 'Start Phone Assessment' }).click();
   await page.getByRole('button', { name: mode }).click();
+  await page.getByLabel('Brand or model').fill('zzzz-nonexistent-zzzz');
+  await page.getByText('No matching models.', { exact: false }).waitFor();
   await page.getByPlaceholder('Search brand or model').fill('iPhone 13 Pro');
   await page.locator('.catalogue-result').filter({ hasText: 'Apple iPhone 13 Pro' }).first().click();
+  await page.getByRole('button', { name: 'Confirm Storage', exact: true }).click();
+  await page.getByRole('alert').getByText('Select or enter a storage capacity.').waitFor();
   await page.getByPlaceholder('Manual storage, e.g. 256GB').fill('256GB');
-  await page.getByRole('button', { name: 'Confirm Storage' }).click();
+  await page.getByRole('button', { name: 'Confirm Storage', exact: true }).click();
 }
 
 (async () => {
@@ -21,6 +30,9 @@ async function selectPhone(page, mode) {
     page.on('pageerror', error => errors.push(error.message));
     await selectPhone(page, 'Value Another Phone');
     assert.equal(await page.getByLabel('Send photos to Gemini for optional verification').isChecked(), false);
+    assert.equal(await page.getByRole('button', { name: 'Analyze Exterior' }).isEnabled(), false);
+    await page.locator('#finalInput-front').setInputFiles({ name: 'bad.png', mimeType: 'image/png', buffer: Buffer.from('invalid') });
+    await page.getByText('This photo could not be read.', { exact: false }).waitFor();
     const fixturePhoto = async index => {
       const encoded = await page.evaluate(n => {
         const canvas = document.createElement('canvas');
@@ -32,22 +44,37 @@ async function selectPhone(page, mode) {
       return { name: 'software-fixture.png', mimeType: 'image/png', buffer: Buffer.from(encoded, 'base64') };
     };
     for (const [i, view] of ['front', 'back', 'camera', 'left_side', 'right_side'].entries()) {
+      if (i === 1) {
+        await page.locator('#finalInput-back').setInputFiles(await fixturePhoto(0));
+        await page.getByText('Use a different photo for each view.').waitFor();
+      }
       await page.locator('#finalInput-' + view).setInputFiles(await fixturePhoto(i));
       await page.waitForFunction(n => document.querySelectorAll('.final-slot.ready').length === n, i + 1);
     }
     const scanUrl = '**/analyze-exterior';
-    await page.route(scanUrl, route => route.fulfill({
-      json: { status: 'ok', assessment_basis: 'review_required',
-        grade: { exterior_grade: 'A', note: 'Software fixture' }, detections: [], merged_damage: [] },
-    }));
     const analyze = page.getByRole('button', { name: 'Analyze Exterior' });
     const report = page.getByRole('button', { name: 'View Exterior Report' });
     const valuations = [];
     page.on('request', request => {
       if (request.url().endsWith('/live-valuation')) valuations.push(request.postDataJSON());
     });
+    await page.route(scanUrl, route => route.fulfill({ status: 503, json: { error: 'Detector unavailable' } }));
     await analyze.click();
-    await page.getByText('Review required. Software fixture').waitFor();
+    await page.getByRole('alert').getByText('Analysis did not complete.', { exact: false }).waitFor();
+    assert.equal(await page.locator('.final-slot.ready').count(), 5);
+    assert.equal(await report.count(), 0);
+    await page.unroute(scanUrl);
+    await page.route(scanUrl, async route => {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      await route.fulfill({ json: { status: 'ok', assessment_basis: 'review_required', yolo_model: 'revalue_exterior_yolo11n_v0.2',
+        grade: { exterior_grade: 'A', note: 'Software fixture' },
+        detections: [{ raw_class: 'scratch', view: 'front', confidence: .87, bounding_box_xyxy: [10, 10, 80, 50], requires_gemini_resolution: true }], merged_damage: [] } });
+    });
+    await analyze.click();
+    await page.getByText('Analyzing photos for visible damage…').waitFor();
+    await page.getByRole('heading', { name: 'Review required' }).waitFor();
+    await page.getByText('scratch · Front · 87.0% · Needs review').waitFor();
+    await page.locator('.damage-tag').filter({ hasText: '87.0%' }).waitFor();
     assert.equal(await report.count(), 0);
     assert.equal(valuations.length, 0);
 
@@ -56,6 +83,7 @@ async function selectPhone(page, mode) {
     await report.click();
     await page.locator('#reportId').filter({ hasText: /^RVA-LIVE-/ }).waitFor();
     assert.match(await page.locator('#estimatedValue').textContent(), /Insufficient market evidence/);
+    assert.equal(await page.locator('#marketState').textContent(), 'No eligible estimate');
     assert.equal(valuations[0].valuation_basis, 'exterior_scan');
     assert.ok(valuations[0].assessment_receipt);
     const previousId = await page.locator('#reportId').textContent();
@@ -83,10 +111,28 @@ async function selectPhone(page, mode) {
     assert.notEqual(await page.locator('#reportId').textContent(), previousId);
     assert.equal(valuations.length, 2);
     assert.match(await page.locator('#estimatedValue').textContent(), /RM1,050–RM1,150/);
+    assert.equal(await page.locator('#marketState').textContent(), 'Evidence-based estimate');
     assert.equal(await page.getByLabel('As-is sale offer, after fees').inputValue(), '');
     await page.getByRole('button', { name: 'How is this price estimated?' }).click();
     await page.getByText('operator-reviewed', { exact: false }).waitFor();
     assert.equal(await page.getByRole('link', { name: 'Fixture seller' }).getAttribute('href'), 'https://fixture.invalid/item');
+    await page.emulateMedia({ media: 'print' });
+    assert.equal(await page.getByRole('button', { name: 'Print / Save PDF' }).isVisible(), false);
+    assert.equal(await page.locator('#marketState').isVisible(), true);
+    await page.emulateMedia({ media: 'screen' });
+
+    await page.unroute('**/live-valuation');
+    await page.route('**/live-valuation', route => route.fulfill({ status: 503, json: { error: 'Software fixture outage' } }));
+    await page.route(scanUrl, route => route.fulfill({ json: { status: 'ok', assessment_basis: 'provisional',
+      yolo_model: 'revalue_exterior_yolo11n_v0.2', grade: { exterior_grade: 'A', note: 'Software fixture' },
+      detections: [], merged_damage: [], assessment_receipt: 'software-fixture' } }));
+    await page.evaluate(() => showPage('scan'));
+    await analyze.click();
+    await report.click();
+    assert.equal(await page.locator('#estimatedValue').textContent(), 'Market estimate unavailable');
+    assert.equal(await page.locator('#marketState').textContent(), 'Valuation request failed');
+    await page.unroute('**/live-valuation');
+    await page.unroute(scanUrl);
 
     await selectPhone(page, 'Value This Phone');
     await page.getByRole('button', { name: 'Create QR + Link' }).click();
@@ -109,8 +155,24 @@ async function selectPhone(page, mode) {
     await remote.getByText('Photos sent successfully').waitFor();
     await page.bringToFront();
     await page.waitForFunction(() => document.querySelectorAll('.final-slot.ready').length === 5);
+
+    const mobile = await remoteContext.newPage();
+    mobile.on('pageerror', error => errors.push(error.message));
+    await selectPhone(mobile, 'Value Another Phone');
+    await mobile.getByRole('button', { name: 'Add right side photo' }).waitFor();
+    assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await mobile.getByRole('button', { name: 'ReValue AI home' }).click();
+    await mobile.getByRole('button', { name: 'Explore demo' }).click();
+    await mobile.getByRole('button', { name: 'iPhone 13 Pro', exact: false }).waitFor();
+    // Exercise the demo report presentation without waiting for the existing simulated checks.
+    await mobile.evaluate(() => { exteriorDone = internalDone = true; showPage('report'); });
+    assert.equal(await mobile.locator('#marketState').textContent(), 'Illustrative demo value');
+    for (const width of [320, 390, 768]) {
+      await mobile.setViewportSize({ width, height: 844 });
+      assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
     assert.deepEqual(errors, []);
-    console.log('Browser smoke passed: review gate, real YOLO receipt, no-evidence report, fixture sources, quote comparison, fresh report and two-tab QR upload.');
+    console.log('Browser smoke passed: catalogue and photo validation, loading/failure/review, real YOLO, reports, quotes, QR capture and mobile/demo layout.');
   } finally {
     await browser.close();
   }

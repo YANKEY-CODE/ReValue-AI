@@ -7,28 +7,25 @@ const csvButton = document.getElementById('csv');
 const jsonButton = document.getElementById('json');
 const statusLine = document.getElementById('status');
 const results = document.getElementById('results');
+const empty = document.getElementById('result-empty');
+const legend = document.getElementById('result-legend');
+const queue = document.getElementById('file-queue');
+const progress = document.getElementById('batch-progress');
+const dropZone = document.getElementById('drop-zone');
+const dialog = document.getElementById('inspect-dialog');
+const zoomArea = document.getElementById('zoom-area');
+const inspectionDetails = document.getElementById('inspection-details');
+const closeInspection = document.getElementById('close-inspect');
+const zoomOut = document.getElementById('zoom-out');
+const zoomIn = document.getElementById('zoom-in');
 const LABELS = { generic_crack: 'Crack', scratch: 'Scratch', bump: 'Bump', paint: 'Paint' };
 let metadata;
 let records = [];
-
-const inspectDialog = document.getElementById('inspect-dialog');
-const inspectContent = document.getElementById('inspect-content');
-const closeInspect = document.getElementById('close-inspect');
-closeInspect.addEventListener('click', () => inspectDialog.close());
-inspectDialog.addEventListener('click', event => {
-  if (event.target === inspectDialog) inspectDialog.close();
-});
-
-function inspectPanel(panel, title) {
-  inspectContent.replaceChildren();
-  const heading = element('h2', title);
-  const copy = panel.cloneNode(true);
-  copy.querySelector('.inspect-button')?.remove();
-  inspectContent.append(heading, copy);
-  inspectDialog.showModal();
-  closeInspect.focus();
-}
-
+let selectedFiles = [];
+let busy = false;
+let zoom = 1;
+let inspected;
+let inspectorTrigger;
 
 function element(tag, label, className) {
   const node = document.createElement(tag);
@@ -37,61 +34,169 @@ function element(tag, label, className) {
   return node;
 }
 
-function renderPanel(title, photo, image, report) {
-  const panel = element('section', undefined, 'panel');
-  panel.append(element('h3', title));
+function status(text, error = false) {
+  statusLine.textContent = text;
+  statusLine.classList.toggle('rv-alert', error);
+}
+
+function updateQueue(focusIndex) {
+  queue.replaceChildren();
+  const visible = selectedFiles.length <= 20 ? selectedFiles : [];
+  queue.hidden = visible.length === 0;
+  for (const [index, file] of visible.entries()) {
+    const row = element('li');
+    const remove = element('button', 'Remove', 'file-remove');
+    remove.type = 'button';
+    remove.disabled = busy;
+    remove.setAttribute('aria-label', `Remove ${file.name}`);
+    remove.addEventListener('click', () => {
+      selectedFiles.splice(index, 1);
+      photos.value = '';
+      updateQueue(index);
+      describeSelection();
+    });
+    row.append(element('span', file.name), remove);
+    queue.append(row);
+  }
+  compareButton.disabled = busy || !metadata || !visible.length;
+  if (focusIndex !== undefined) {
+    (queue.querySelectorAll('button')[Math.min(focusIndex, visible.length - 1)] || photos).focus();
+  }
+}
+
+function describeSelection() {
+  if (selectedFiles.length > 20) status('Choose no more than 20 photos for one comparison.', true);
+  else if (selectedFiles.length) status(`${selectedFiles.length} ${selectedFiles.length === 1 ? 'photo ready' : 'photos ready'} to compare.`);
+  else if (metadata) status('Ready to compare photos.');
+}
+
+photos.addEventListener('change', () => {
+  selectedFiles = Array.from(photos.files);
+  updateQueue();
+  describeSelection();
+});
+dropZone.addEventListener('dragover', event => {
+  event.preventDefault();
+  if (!busy && event.dataTransfer.types.includes('Files')) dropZone.classList.add('drag-active');
+});
+dropZone.addEventListener('dragleave', event => {
+  if (!dropZone.contains(event.relatedTarget)) dropZone.classList.remove('drag-active');
+});
+dropZone.addEventListener('drop', event => {
+  event.preventDefault();
+  dropZone.classList.remove('drag-active');
+  if (busy || !event.dataTransfer.files.length) return;
+  photos.value = '';
+  selectedFiles = Array.from(event.dataTransfer.files);
+  updateQueue();
+  describeSelection();
+});
+
+function renderPhoto(title, jpeg, image, report) {
   const view = element('div', undefined, 'photo');
   view.style.aspectRatio = `${image.width} / ${image.height}`;
+  view.style.setProperty('--image-ratio', image.width / image.height);
   const img = element('img');
-  img.src = `data:image/jpeg;base64,${photo}`;
+  img.src = `data:image/jpeg;base64,${jpeg}`;
   img.alt = title;
   view.append(img);
-  panel.append(view);
-  const inspect = element('button', 'Inspect image larger', 'inspect-button');
-  inspect.type = 'button';
-  inspect.setAttribute('aria-label', 'Inspect ' + title + ' image larger');
-  inspect.addEventListener('click', () => inspectPanel(panel, title));
-  // Insert the action after the rendered image and its annotations.
-  if (!report) {
-    panel.append(inspect);
-    return panel;
-  }
+  if (!report?.detections.length) return view;
 
   const overlay = element('div', undefined, 'overlay');
   overlay.setAttribute('aria-hidden', 'true');
-  const counts = element('div', undefined, 'counts');
-  const list = element('ul', undefined, 'detections');
   for (const item of report.detections) {
     const [x1, y1, x2, y2] = item.xyxy_px;
-    const confidence = `${(100 * item.confidence).toFixed(1)}%`;
-    const label = LABELS[item.comparison_class];
     const box = element('div', undefined, 'box');
     box.dataset.class = item.comparison_class;
+    box.classList.toggle('label-left', x1 / image.width > 0.60);
     box.style.left = `${100 * x1 / image.width}%`;
     box.style.top = `${100 * y1 / image.height}%`;
     box.style.width = `${100 * (x2 - x1) / image.width}%`;
     box.style.height = `${100 * (y2 - y1) / image.height}%`;
-    box.append(element('span', `${label} ${confidence}`));
+    box.append(element('span', `${LABELS[item.comparison_class]} ${confidence(item)}`));
     overlay.append(box);
-    const mapping = item.raw_class === item.comparison_class ? '' : ` (${item.raw_class} → ${item.comparison_class})`;
-    list.append(element('li', `${label}${mapping} · ${confidence}`));
   }
   view.append(overlay);
-  for (const [label, count] of Object.entries(report.counts)) {
-    counts.append(element('span', `${LABELS[label]} ${count}`));
-  }
-  panel.append(counts, element('p', `CPU inference ${report.cpu_inference_ms.toFixed(1)} ms · whole prediction ${report.cpu_predict_wall_ms.toFixed(1)} ms`, 'timing'));
-  if (report.detections.length) panel.append(list);
-  else panel.append(element('p', 'No detections at 0.25.'));
-  panel.append(inspect);
+  return view;
+}
+
+function confidence(item) {
+  return `${(100 * item.confidence).toFixed(1)}%`;
+}
+
+function renderPanel(title, jpeg, image, report) {
+  const panel = element('section', undefined, 'panel');
+  const frame = element('div', undefined, 'panel-frame');
+  frame.append(renderPhoto(title, jpeg, image, report));
+  const inspect = element('button', 'Inspect image', 'rv-button-secondary inspect-button');
+  inspect.type = 'button';
+  inspect.setAttribute('aria-label', `Inspect ${title} image larger`);
+  inspect.addEventListener('click', () => openInspection(inspect, title, jpeg, image, report));
+  panel.append(element('h4', title), frame, inspect);
+  if (report) appendPredictionDetails(panel, report);
   return panel;
 }
 
+function appendPredictionDetails(container, report) {
+  const counts = element('div', undefined, 'counts');
+  for (const [label, count] of Object.entries(report.counts)) {
+    counts.append(element('span', `${LABELS[label]} ${count}`));
+  }
+  const timing = element('div', undefined, 'timing');
+  timing.append(element('strong', `CPU inference ${report.cpu_inference_ms.toFixed(1)} ms`),
+    element('span', `Whole prediction ${report.cpu_predict_wall_ms.toFixed(1)} ms`));
+  container.append(counts, timing);
+  if (report.detections.length) {
+    const list = element('ul', undefined, 'detections');
+    for (const item of report.detections) {
+      const mapping = item.raw_class === item.comparison_class ? '' : ` (${item.raw_class} → ${item.comparison_class})`;
+      list.append(element('li', `${LABELS[item.comparison_class]}${mapping} · ${confidence(item)}`));
+    }
+    container.append(list);
+  } else {
+    container.append(element('p', `No detections at ${metadata.settings.conf}.`, 'no-detections'));
+  }
+}
+
+function openInspection(trigger, title, jpeg, image, report) {
+  inspectorTrigger = trigger;
+  zoom = 1;
+  inspected = renderPhoto(title, jpeg, image, report);
+  zoomArea.replaceChildren(inspected);
+  inspectionDetails.replaceChildren();
+  inspectionDetails.hidden = !report;
+  if (report) appendPredictionDetails(inspectionDetails, report);
+  document.getElementById('inspection-title').textContent = `Inspect · ${title}`;
+  dialog.showModal();
+  zoomArea.scrollTo(0, 0);
+  sizeInspection();
+  closeInspection.focus();
+}
+
+function sizeInspection() {
+  if (!dialog.open) return;
+  const fitted = Math.min(zoomArea.clientWidth - 18, (zoomArea.clientHeight - 18) * Number(inspected.style.getPropertyValue('--image-ratio')));
+  inspected.style.width = `${Math.max(1, fitted) * zoom}px`;
+  document.getElementById('zoom-level').textContent = `${Math.round(zoom * 100)}%`;
+  zoomOut.disabled = zoom === 1;
+  zoomIn.disabled = zoom === 3;
+}
+
+zoomOut.addEventListener('click', () => { zoom = Math.max(1, zoom - .25); sizeInspection(); });
+zoomIn.addEventListener('click', () => { zoom = Math.min(3, zoom + .25); sizeInspection(); });
+closeInspection.addEventListener('click', () => dialog.close());
+dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+dialog.addEventListener('close', () => {
+  zoomArea.replaceChildren();
+  inspectorTrigger?.focus();
+});
+window.addEventListener('resize', sizeInspection);
+
 function renderResult(record, preview) {
-  const article = element('article');
-  article.append(element('h2', `${record.image_id} · ${record.filename}`));
+  const article = element('article', undefined, 'rv-card');
+  article.append(element('h3', `${record.image_id} · ${record.filename}`));
   if (record.error) {
-    article.append(element('p', record.error, 'error'));
+    article.append(element('p', record.error, 'rv-alert error'));
   } else {
     const grid = element('div', undefined, 'panel-grid');
     grid.append(renderPanel('Original photo', preview, record.image));
@@ -105,19 +210,23 @@ function renderResult(record, preview) {
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
-  const files = Array.from(photos.files);
-  if (!files.length || files.length > 20) {
-    statusLine.textContent = 'Choose between 1 and 20 photos.';
-    return;
-  }
-  photos.disabled = compareButton.disabled = csvButton.disabled = jsonButton.disabled = true;
+  if (busy || !metadata || !selectedFiles.length || selectedFiles.length > 20) return;
+  const files = selectedFiles.slice();
+  busy = true;
+  photos.disabled = csvButton.disabled = jsonButton.disabled = true;
+  updateQueue();
   records = [];
   results.replaceChildren();
+  results.setAttribute('aria-busy', 'true');
+  empty.hidden = legend.hidden = true;
+  progress.max = files.length;
+  progress.value = 0;
+  progress.hidden = false;
   let completed = 0;
   for (const [index, file] of files.entries()) {
     const record = { image_id: `Photo ${index + 1}`, filename: file.name };
     let preview;
-    statusLine.textContent = `Comparing photo ${index + 1} of ${files.length}…`;
+    status(`Comparing photo ${index + 1} of ${files.length}…`);
     try {
       const response = await fetch('/compare', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
       const payload = await response.json();
@@ -131,10 +240,16 @@ form.addEventListener('submit', async event => {
     }
     records.push(record);
     renderResult(record, preview);
+    progress.value = index + 1;
   }
-  photos.disabled = compareButton.disabled = csvButton.disabled = jsonButton.disabled = false;
+  busy = false;
+  photos.disabled = csvButton.disabled = jsonButton.disabled = false;
+  updateQueue();
+  results.removeAttribute('aria-busy');
+  progress.hidden = true;
+  legend.hidden = completed === 0;
   const failed = files.length - completed;
-  statusLine.textContent = `${completed} of ${files.length} photos compared.${failed ? ` ${failed} could not be compared.` : ''} Exports are ready.`;
+  status(`${completed} of ${files.length} photos compared.${failed ? ` ${failed} could not be compared.` : ''} Exports are ready.`, completed === 0);
 });
 
 function csvCell(value) {
@@ -186,7 +301,20 @@ fetch('/metadata').then(response => {
 }).then(data => {
   metadata = data;
   const settings = metadata.settings;
-  document.getElementById('settings').textContent = `Both models · ${settings.imgsz} × ${settings.imgsz} · confidence ${settings.conf} · NMS IoU ${settings.iou.toFixed(2)} · CPU`;
-  statusLine.textContent = 'Ready to compare photos.';
-  compareButton.disabled = false;
-}).catch(() => { statusLine.textContent = 'The local comparison is unavailable. Check the PowerShell window and reload this page.'; });
+  const entries = [
+    ['Image size', `${settings.imgsz} × ${settings.imgsz}`],
+    ['Confidence threshold', settings.conf],
+    ['NMS IoU', settings.iou.toFixed(2)],
+    ['Device', settings.device.toUpperCase()],
+  ];
+  document.getElementById('settings').replaceChildren(...entries.map(([label, value]) => {
+    const row = element('div');
+    row.append(element('dt', label), element('dd', value));
+    return row;
+  }));
+  status('Ready to compare photos.');
+  updateQueue();
+  describeSelection();
+}).catch(() => {
+  status('The local comparison is unavailable. Check the PowerShell window and reload this page.', true);
+});

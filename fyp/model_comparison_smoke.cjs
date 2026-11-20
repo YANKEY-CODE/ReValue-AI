@@ -28,6 +28,8 @@ const { chromium } = require('playwright');
       { name: 'corrupt.png', mimeType: 'image/png', buffer: Buffer.from('invalid') },
       await photo('generated-back.png', '#658664'),
     ]);
+    await page.getByRole('button', { name: 'Remove generated-back.png' }).waitFor();
+    assert.equal(await page.getByRole('list', { name: 'Selected photos' }).getByRole('listitem').count(), 3);
     const realResponse = page.waitForResponse(response => response.url().endsWith('/compare') && response.ok());
     await page.getByRole('button', { name: 'Compare photos' }).click();
     const real = await (await realResponse).json();
@@ -72,12 +74,20 @@ const { chromium } = require('playwright');
     assert.equal(await page.locator('.box').count(), 3);
     assert.equal(await page.locator('.box[data-class=generic_crack]').evaluate(node => node.style.left), '12.5%');
     assert.equal(await page.locator('.counts').last().textContent(), 'Crack 1Scratch 0Bump 1Paint 1');
-    // Verify the enlarged inspection retains overlays and remains dismissible.
-    await page.getByRole('button', { name: /Inspect Houdan YOLO11s.*image larger/ }).click();
-    await page.getByRole('dialog', { name: 'Enlarged model image inspection' }).waitFor();
-    assert.equal(await page.locator('#inspect-dialog .box').count(), 3);
-    await page.getByRole('button', { name: 'Close inspection' }).click();
-    assert.equal(await page.getByRole('dialog', { name: 'Enlarged model image inspection' }).count(), 0);
+    const inspect = page.getByRole('button', { name: /Inspect Houdan YOLO11s.*image larger/ });
+    await inspect.click();
+    const dialog = page.getByRole('dialog', { name: 'Enlarged model image inspection' });
+    await dialog.waitFor();
+    await dialog.getByText('Crack (crack → generic_crack) · 82.0%').waitFor();
+    await dialog.getByRole('button', { name: 'Zoom in' }).click();
+    await dialog.getByText('125%').waitFor();
+    assert.equal(await dialog.locator('.box[data-class=generic_crack]').count(), 1);
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal(await inspect.evaluate(node => document.activeElement === node), true);
+    await inspect.click();
+    await dialog.getByRole('button', { name: 'Close inspection' }).click();
+    await dialog.waitFor({ state: 'hidden' });
     await page.waitForFunction(() => [...document.images].every(img => img.complete && img.naturalWidth > 0));
     const csv = await exportFile('Export CSV');
     assert.ok(csv.startsWith('\uFEFF'));
@@ -85,6 +95,26 @@ const { chromium } = require('playwright');
     assert.match(csv, /"crack","generic_crack","0.82","8","4","30","24"/);
     assert.match(csv, /"'=private-test\.png"/);
     assert.equal(csv.trim().split(/\r?\n/).length, 5);
+    const panels = page.locator('.panel');
+    assert.ok((await panels.nth(0).boundingBox()).x < (await panels.nth(1).boundingBox()).x);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok((await panels.nth(0).boundingBox()).y < (await panels.nth(1).boundingBox()).y);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const files = await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['contents'], 'dropped.png', { type: 'image/png' }));
+      return transfer;
+    });
+    await page.locator('#drop-zone').dispatchEvent('drop', { dataTransfer: files });
+    await page.getByRole('button', { name: 'Remove dropped.png' }).click();
+    assert.equal(await page.getByRole('button', { name: 'Compare photos' }).isEnabled(), false);
+    for (const width of [320, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
+    await page.emulateMedia({ media: 'print' });
+    assert.equal(await page.getByRole('button', { name: 'Export CSV' }).isVisible(), false);
+    assert.equal(await page.locator('#results .panel').count(), 3);
     assert.deepEqual(errors, []);
     console.log('Comparison browser checks passed: real multi-photo CPU inference, rejected input, overlays, counts and both downloads.');
   } finally {

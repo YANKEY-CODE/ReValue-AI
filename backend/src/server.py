@@ -176,34 +176,28 @@ def _remote_capture_page(token: str) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#061b20">
-<title>ReValue AI Remote Exterior Scan</title>
-<style>
-:root{{--bg:#061b20;--panel:#0a252b;--line:#1f4a52;--teal:#16d9c5;--cyan:#83f7e9;--lime:#b9ff78;--gold:#f5c451;--ink:#f5fbfa;--muted:#9db8bb}}
-*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;background:radial-gradient(circle at 90% -10%,rgba(22,217,197,.25),transparent 34%),linear-gradient(180deg,#061b20,#041418);color:var(--ink);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}}
-.wrap{{max-width:520px;margin:0 auto;padding:18px 16px 30px}}.brand{{font-weight:900;display:flex;align-items:center;gap:9px;margin-bottom:20px}}.mark{{width:34px;height:34px;border-radius:12px;background:linear-gradient(135deg,var(--teal),var(--lime));display:grid;place-items:center;color:#052126;font-weight:900}}
-.eyebrow{{font-size:11px;letter-spacing:.12em;color:var(--teal);font-weight:900}}h1{{font-size:30px;line-height:1.05;margin:8px 0 10px}}.card{{border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,rgba(16,52,60,.96),rgba(7,31,37,.96));padding:15px;box-shadow:0 18px 55px rgba(0,0,0,.34)}}
-.progress{{display:flex;gap:7px;margin:12px 0 14px}}.dot{{flex:1;height:8px;border-radius:999px;background:#082229;border:1px solid rgba(131,247,233,.12)}}.dot.done{{background:linear-gradient(90deg,var(--teal),var(--lime))}}.dot.current{{background:var(--gold)}}.stage{{font-weight:900;color:var(--cyan);margin-bottom:10px}}
-.camera{{position:relative;min-height:330px;border:1px solid rgba(131,247,233,.18);border-radius:20px;background:#031519;display:grid;place-items:center;overflow:hidden}}video,img{{width:100%;height:100%;min-height:330px;object-fit:cover;display:block}}.guide{{position:absolute;inset:30px;border:2px dashed rgba(131,247,233,.7);border-radius:30px;pointer-events:none;box-shadow:0 0 30px rgba(22,217,197,.15)}}.hint{{color:var(--muted);font-size:13px;text-align:center;padding:28px;line-height:1.45}}
-button{{width:100%;border:0;border-radius:16px;padding:15px 16px;margin-top:11px;font:inherit;font-weight:900;cursor:pointer}}.primary{{background:linear-gradient(120deg,var(--teal),var(--lime));color:#052126}}.secondary{{background:#09252b;color:var(--ink);border:1px solid var(--line)}}.row{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}.doneText{{display:none;text-align:center;padding:28px 10px;color:var(--lime);font-weight:900}}.doneText span{{display:block;color:var(--muted);font-size:13px;margin-top:8px;font-weight:600}}input{{display:none}}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f6f8f5">
+<title>ReValue AI | Remote exterior capture</title>
+<link rel="stylesheet" href="/revalue-design.css">
+<link rel="stylesheet" href="/revalue-remote.css">
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><div class="mark">RV</div>ReValue AI</div>
-  <div class="eyebrow">REMOTE CAMERA</div>
+  <div class="rv-brand"><span class="rv-mark" aria-hidden="true">RV</span>ReValue AI</div>
+  <div class="rv-eyebrow">Remote camera</div>
   <h1>Exterior Scan</h1>
-  <section class="card" id="captureCard">
-    <div class="stage" id="stage">1 of 5 · Front</div>
-    <div class="progress" id="progress"></div>
+  <section class="rv-card card" id="captureCard">
+    <div class="stage" id="stage" role="status">1 of 5 · Front</div>
+    <div class="progress" id="progress" aria-hidden="true"></div>
     <div class="camera" id="cameraBox"><div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div></div>
-    <input id="fileInput" type="file" accept="image/*" capture="environment">
-    <button class="primary" type="button" onclick="openCamera()">Take Photo</button>
-    <div class="row" id="previewActions" style="display:none"><button class="secondary" type="button" onclick="retake()">Retake</button><button class="primary" type="button" onclick="usePhoto()">Use Photo</button></div>
-    <button class="primary" id="sendBtn" type="button" onclick="sendPhotos()" style="display:none">Send Photos</button>
+    <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" capture="environment" hidden>
+    <button class="rv-button" type="button" onclick="openCamera()">Take Photo</button>
+    <div class="row" id="previewActions" style="display:none"><button class="rv-button-secondary" type="button" onclick="retake()">Retake</button><button class="rv-button" type="button" onclick="usePhoto()">Use Photo</button></div>
+    <button class="rv-button" id="sendBtn" type="button" onclick="sendPhotos()" style="display:none">Send Photos</button>
+    <p class="rv-alert" id="captureError" role="alert" hidden></p>
   </section>
-  <section class="card doneText" id="doneText">Photos sent successfully<span>You can return to the other device.</span></section>
+  <section class="rv-card card doneText" id="doneText" role="status">Photos sent successfully<span>You can return to the other device.</span></section>
 </div>
 <script>
 const SESSION_ID={json.dumps(token)};
@@ -215,6 +209,8 @@ function openCamera(){{if(posting||current>=VIEWS.length)return;document.getElem
 document.getElementById('fileInput').addEventListener('change',e=>{{const file=e.target.files&&e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{{pending={{name:file.name,type:file.type||'image/jpeg',data:String(reader.result)}};document.getElementById('cameraBox').innerHTML=`<img src="${{pending.data}}" alt="Preview"><div class="guide"></div>`;document.getElementById('previewActions').style.display='grid'}};reader.onerror=()=>alert('Could not read the image. Please try another photo.');reader.readAsDataURL(file)}});
 function retake(){{pending=null;document.getElementById('previewActions').style.display='none';document.getElementById('cameraBox').innerHTML='<div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div>';document.getElementById('fileInput').value=''}}
 let posting=false;
+const captureError=document.getElementById("captureError");
+function showCaptureError(message){{captureError.textContent=message;captureError.hidden=!message}}
 async function postCapture(path, payload){{
   const response=await fetch(path,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
   const result=await response.json();
@@ -223,6 +219,7 @@ async function postCapture(path, payload){{
 async function usePhoto(){{
   if(!pending||posting||current>=VIEWS.length)return;
   posting=true;
+  showCaptureError('');
   try{{
     await postCapture(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/photo`,{{
       view:VIEWS[current],filename:pending.name,mime_type:pending.type,bytes_b64:pending.data.split(',')[1]||''
@@ -230,16 +227,17 @@ async function usePhoto(){{
     current++;
     retake();
     render();
-  }}catch(error){{alert(error.message)}}finally{{posting=false}}
+  }}catch(error){{showCaptureError(error.message)}}finally{{posting=false}}
 }}
 async function sendPhotos(){{
   if(posting||current<VIEWS.length)return;
   posting=true;
+  showCaptureError('');
   try{{
     await postCapture(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/complete`,{{}});
     document.getElementById('captureCard').style.display='none';
     document.getElementById('doneText').style.display='block';
-  }}catch(error){{alert(error.message)}}finally{{posting=false}}
+  }}catch(error){{showCaptureError(error.message)}}finally{{posting=false}}
 }}
 render();
 </script>

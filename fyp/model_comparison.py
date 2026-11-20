@@ -153,7 +153,7 @@ class ComparisonHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; "
+        self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
                          "img-src data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
         self.end_headers()
         self.wfile.write(content)
@@ -175,6 +175,10 @@ class ComparisonHandler(BaseHTTPRequestHandler):
             self._send(200, Path(__file__).with_suffix(".html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/model_comparison.js":
             self._send(200, Path(__file__).with_suffix(".js").read_bytes(), "text/javascript; charset=utf-8")
+        elif self.path == "/model_comparison.css":
+            self._send(200, Path(__file__).with_suffix(".css").read_bytes(), "text/css; charset=utf-8")
+        elif self.path == "/revalue-design.css":
+            self._send(200, (ROOT / "app" / "revalue-design.css").read_bytes(), "text/css; charset=utf-8")
         elif self.path == "/metadata":
             self._json(200, self.server.runner.metadata)
         else:

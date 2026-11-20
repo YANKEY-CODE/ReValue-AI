@@ -3,129 +3,74 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ReValue AI | Qualitative model comparison</title>
-  <style>
-
-    :root { color-scheme:light; font-family:Inter,"Segoe UI",system-ui,sans-serif; color:#183139; background:#f5f8f7; --green:#087d69; --line:#d7e5e0; --muted:#5b7178; }
-    *,*:before,*:after { box-sizing:border-box; }
-    body { margin:0;min-height:100vh;background:radial-gradient(800px 320px at 80% -200px,#e0f5e9,transparent),#f5f8f7; }
-    button,input { font:inherit; }
-    button { cursor:pointer; }
-    button:disabled { opacity:.52;cursor:not-allowed; }
-    :focus-visible { outline:3px solid #42b99e;outline-offset:3px; }
-    .topbar { background:#fff;border-bottom:1px solid var(--line); }
-    .topbar-inner { max-width:1420px;margin:auto;padding:16px clamp(18px,4vw,52px);display:flex;gap:14px;align-items:center;justify-content:space-between; }
-    .brand { display:flex;align-items:center;gap:11px;font-size:1rem;font-weight:800;letter-spacing:-.02em;color:#173a33; }
-    .logo { width:38px;height:38px;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:1rem; }
-    .workspace-tag { border:1px solid #c9dfd4;background:#edf8f2;border-radius:999px;padding:6px 10px;color:#126b55;font-size:.74rem;font-weight:750; }
-    main { max-width:1420px;margin:auto;padding:clamp(22px,4vw,48px); }
-    .intro-layout { display:flex;align-items:flex-start;justify-content:space-between;gap:22px;flex-wrap:wrap; }
-    .eyebrow { color:var(--green);font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;font-weight:800;margin:0 0 8px; }
-    h1 { font-size:clamp(2rem,4vw,3rem);letter-spacing:-.047em;line-height:1.08;margin:0 0 12px; }
-    h2,h3 { letter-spacing:-.02em; }
-    p { line-height:1.65;margin:.4rem 0; }
-    .intro { max-width:70ch;color:var(--muted);font-size:.95rem; }
-    .protocol { background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 16px;font-size:.78rem;color:#466467;line-height:1.65;max-width:310px; }
-    .protocol b { display:block;color:#173d36;margin-bottom:2px; }
-    .controls, article { background:#fff;border:1px solid var(--line);border-radius:20px;padding:clamp(17px,2vw,26px);margin-top:22px;box-shadow:0 10px 30px rgba(19,72,56,.05); }
-    .controls h2 { font-size:1.22rem;margin:0 0 6px; }
-    .controls-lede { color:var(--muted);font-size:.88rem; }
-    .upload-control { margin:17px 0 12px;padding:23px;border:1.5px dashed #9fcbbd;border-radius:15px;background:#f6fbf8; }
-    label { font-weight:750;display:block;margin-bottom:8px; }
-    input[type=file] { display:block;max-width:100%;width:100%;font-size:.89rem; }
-    input[type=file]::file-selector-button { background:#fff;border:1px solid #a8cfc1;color:#095f50;border-radius:9px;padding:9px 12px;margin-right:12px;font-weight:750;cursor:pointer; }
-    .upload-control p { color:var(--muted);font-size:.81rem;margin:10px 0 0; }
-    #settings { background:#edf7f2;color:#205a4b;padding:9px 12px;border-radius:10px;font-size:.83rem;display:inline-block;max-width:100%;overflow-wrap:anywhere; }
-    .toolbar { display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px; }
-    button { border:1px solid #c2dacf;border-radius:10px;padding:11px 16px;background:#fff;color:#0d6b59;font-weight:750;transition:background .16s,border-color .16s; }
-    button:hover:not(:disabled) { background:#eff8f3;border-color:#8bb9a7; }
-    button[type=submit] { background:var(--green);color:#fff;border-color:var(--green); }
-    button[type=submit]:hover:not(:disabled) { background:#086c5b; }
-    #status { color:#48666d;font-size:.86rem;min-height:1.5em;margin:14px 0 0; }
-    .results-heading { display:flex;gap:12px;justify-content:space-between;align-items:baseline;margin-top:35px; }
-    .results-heading h2 { font-size:1.42rem;margin:0; }
-    .results-heading p { color:var(--muted);font-size:.85rem;margin:0; }
-    .legend { display:flex;flex-wrap:wrap;gap:9px;margin-top:13px; }
-    .legend span { border-radius:999px;background:#fff;border:1px solid var(--line);padding:5px 11px;font-size:.74rem;font-weight:700; }
-    .legend .crack { color:#845d0c; }.legend .scratch { color:#0e756c; }.legend .bump { color:#4e5bb8; }.legend .paint { color:#a63c74; }
-    article h2 { font-size:1.15rem;margin:0 0 18px;overflow-wrap:anywhere;color:#17343a; }
-    .panel-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start; }
-    .panel { min-width:0;border:1px solid #e0eae6;padding:14px;border-radius:14px;background:#fcfefd; }
-    .panel h3 { font-size:.98rem;min-height:2.3em;margin:0 0 12px;color:#1e4141; }
-    .photo { position:relative;background:#eaf1ee;border:1px solid #e0eae5;border-radius:9px;overflow:hidden; }
-    .photo img { width:100%;height:100%;display:block;object-fit:fill; }
-    .overlay { position:absolute;inset:0;pointer-events:none; }
-    .box { position:absolute;border:2px solid var(--box,#fff);box-shadow:0 0 0 1px rgba(0,0,0,.38); }
-    .box[data-class=generic_crack] { --box:#f0bb38; }
-    .box[data-class=scratch] { --box:#36decb; }
-    .box[data-class=bump] { --box:#919ff1; }
-    .box[data-class=paint] { --box:#ff8cc9; }
-    .box span { position:absolute;top:0;left:0;font-size:.73rem;line-height:1.3;padding:3px 5px;white-space:nowrap;background:#14262c;color:var(--box);font-weight:750; }
-    .counts { display:flex;flex-wrap:wrap;gap:7px;margin-top:14px; }
-    .counts span { background:#e8f5ee;border:1px solid #d7ece1;border-radius:7px;padding:5px 8px;font-size:.76rem;font-weight:700;color:#245d50; }
-    .timing,.detections { font-size:.83rem;color:#546f71;line-height:1.6; }
-    .detections { padding-left:21px;margin:6px 0 0; }
-    .detections li { margin:5px 0; }
-    .error { color:#a52838;background:#fff0f2;border:1px solid #f2ced4;border-radius:10px;padding:12px; }
-    .footnote { font-size:.82rem;color:#667b7c;margin:24px 0; }
-    .inspect-button { display:block;width:100%;margin-top:12px;padding:8px 12px;font-size:.81rem; }
-    #inspect-dialog { border:1px solid #cbded6;border-radius:18px;padding:20px;width:min(94vw,1050px);max-height:88vh;overflow:auto;background:#fff;color:#183139;box-shadow:0 30px 100px rgba(0,0,0,.24); }
-    #inspect-dialog::backdrop { background:rgba(16,38,40,.66); }
-    .inspect-head { display:flex;justify-content:flex-end;margin-bottom:8px; }
-    #inspect-dialog h2 { font-size:1.15rem;margin:0 0 12px; }
-    #inspect-dialog .panel { border:0;padding:0;background:#fff; }
-    #inspect-dialog .panel h3 { display:none; }
-    #inspect-dialog .photo { margin:0 auto;max-height:66vh;max-width:100%; }
-    #inspect-dialog .photo img { max-height:66vh; }
-    @media (max-width:1050px) { .panel-grid { grid-template-columns:1fr 1fr; }.panel:first-child { grid-column:1 / -1; }.panel:first-child .photo { max-width:590px;margin:auto; } }
-    @media (max-width:700px) {
-      .topbar-inner { padding:12px 16px; }
-      main { padding:20px 15px 38px; }
-      .intro-layout { display:block; }
-      .protocol { max-width:none;margin-top:16px; }
-      .controls,article { border-radius:16px;padding:16px;margin-top:17px; }
-      .upload-control { padding:16px; }
-      .panel-grid { grid-template-columns:1fr; }
-      .panel:first-child { grid-column:auto; }
-      .panel h3 { min-height:0; }
-      .results-heading { display:block; }
-      .toolbar button { flex:1 1 140px; }
-    }
-    @media (prefers-reduced-motion:reduce) { *,*:before,*:after { animation:none!important;transition:none!important;scroll-behavior:auto!important; } }
-    @media print { body { background:#fff; }.topbar,.controls,.footnote { display:none; } main { max-width:none;padding:0; } article { box-shadow:none;break-inside:avoid; } .panel-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .panel:first-child { grid-column:auto; } }
-  </style>
+  <meta name="theme-color" content="#f6f8f5">
+  <title>ReValue AI | Compare damage detectors</title>
+  <link rel="stylesheet" href="/revalue-design.css">
+  <link rel="stylesheet" href="/model_comparison.css">
   <script defer src="/model_comparison.js"></script>
 </head>
 <body>
-  <header class="topbar"><div class="topbar-inner"><div class="brand"><span class="logo" aria-hidden="true">R</span>ReValue AI</div><span class="workspace-tag">Local research workspace</span></div></header>
-  <main>
-    <header class="intro-layout"><div>
-      <p class="eyebrow">AI model evaluation</p>
-      <h1>Compare damage detection models</h1>
-      <p class="intro">Compare ReValue YOLO11n and experimental Houdan YOLO11s on the same smartphone photos. Boxes and counts are model predictions. Accuracy requires independently verified annotations.</p>
-      </div><aside class="protocol"><b>Fair comparison settings</b>640 × 640 · Confidence 0.25 · IoU 0.70 · CPU<br>Same image, two detectors. Results are qualitative, not validated accuracy.</aside>
+  <a class="rv-skip rv-button" href="#comparison">Skip to content</a>
+  <header class="rv-header">
+    <div class="rv-header-inner">
+      <div class="rv-brand"><span class="rv-mark"><svg class="rv-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="7" y="3.5" width="10" height="17" rx="2.6"/><path d="M10 7h4m-3 10.5h2M4 8h2m-2 8h2m12-8h2m-2 8h2" stroke-linecap="round"/></svg></span>ReValue AI</div>
+      <span class="rv-context">Local comparison tool</span>
+    </div>
+  </header>
+  <main id="comparison">
+    <header class="comparison-intro">
+      <div class="rv-eyebrow">Qualitative model comparison</div>
+      <h1>Compare damage detectors</h1>
+      <p>Inspect predictions from ReValue YOLO11n and experimental Houdan YOLO11s on the same photos. Accuracy requires independently verified annotations.</p>
     </header>
-    <form id="compare-form" class="controls">
-      <h2>Upload test photos</h2>
-      <p class="controls-lede">Choose your own authorized smartphone photos. Both models process each photo automatically.</p>
-      <div class="upload-control">
-      <label for="photos">Smartphone photos</label>
-      <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple required>
-      <p>Select up to 20 JPEG, PNG or WebP photos, each up to 8 MiB and 16 megapixels. Photos are processed locally.</p>
+    <div class="workspace-grid">
+      <form id="compare-form" class="rv-card compare-card">
+        <h2>Photos for this comparison</h2>
+        <p class="rv-muted">Up to 20 JPEG, PNG or WebP images. Each can be up to 8 MiB and 16 megapixels.</p>
+        <div id="drop-zone" class="drop-zone">
+          <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M4 16l4-4 4 4 4-6 4 5"/><circle cx="9" cy="8.5" r="1"/></svg>
+          <label for="photos" class="file-label">Smartphone photos</label>
+          <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple>
+          <span class="drop-hint">Or drop files here</span>
+        </div>
+        <ul id="file-queue" class="file-queue" aria-label="Selected photos" hidden></ul>
+        <p id="status" role="status">Connecting to the local comparison…</p>
+        <progress id="batch-progress" aria-label="Photos processed" max="1" value="0" hidden></progress>
+        <div class="toolbar"><button class="rv-button" id="compare" type="submit" disabled>Compare photos</button></div>
+      </form>
+      <aside class="rv-card compare-card settings-card" aria-labelledby="settings-heading">
+        <h2 id="settings-heading">Run settings</h2>
+        <p class="rv-muted">Both models use the same settings and run on this computer.</p>
+        <dl id="settings" class="settings-grid"><div><dt>Runtime</dt><dd>Connecting…</dd></div></dl>
+      </aside>
+    </div>
+    <section class="results-section" aria-labelledby="results-heading">
+      <div class="results-head">
+        <h2 id="results-heading">Results</h2>
+        <div class="export-actions">
+          <button class="rv-button-secondary" id="csv" type="button" disabled>Export CSV</button>
+          <button class="rv-button-secondary" id="json" type="button" disabled>Export JSON</button>
+        </div>
       </div>
-      <p id="settings"></p>
-      <div class="toolbar">
-        <button id="compare" type="submit" disabled>Compare photos</button>
-        <button id="csv" type="button" disabled>Export CSV</button>
-        <button id="json" type="button" disabled>Export JSON</button>
+      <div class="result-empty" id="result-empty">Add photos and run a comparison to see both detectors side by side.</div>
+      <div id="result-legend" class="result-legend" aria-label="Bounding box legend" hidden>
+        <span><i data-class="generic_crack"></i>Crack</span><span><i data-class="scratch"></i>Scratch</span><span><i data-class="bump"></i>Bump</span><span><i data-class="paint"></i>Paint</span>
       </div>
-      <p id="status" role="status">Connecting to the local comparison…</p>
-    </form>
-    <div class="results-heading"><h2>Results</h2><p>Original photograph · ReValue YOLO11n · Houdan YOLO11s</p></div>
-    <div class="legend" aria-label="Damage classes"><span class="crack">Crack</span><span class="scratch">Scratch</span><span class="bump">Bump</span><span class="paint">Paint damage</span></div>
-    <section id="results" aria-label="Comparison results"></section>
-    <p class="footnote">Model predictions are not ground-truth labels. Review suspected misses and false detections manually before drawing conclusions.</p>
-    <dialog id="inspect-dialog" aria-label="Enlarged model image inspection"><div class="inspect-head"><button type="button" id="close-inspect">Close inspection</button></div><div id="inspect-content"></div></dialog>
+      <div id="results" aria-label="Comparison results"></div>
+    </section>
   </main>
+  <dialog id="inspect-dialog" class="inspection" aria-label="Enlarged model image inspection">
+    <div class="inspection-header">
+      <h2 id="inspection-title">Inspect photo</h2>
+      <button class="rv-button-secondary" id="close-inspect" type="button">Close inspection</button>
+    </div>
+    <div class="zoom-controls">
+      <button class="rv-button-secondary" id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <output id="zoom-level" aria-live="polite">100%</output>
+      <button class="rv-button-secondary" id="zoom-in" type="button" aria-label="Zoom in">+</button>
+    </div>
+    <div id="zoom-area" class="zoom-area" tabindex="0" aria-label="Image inspection area"></div>
+    <div id="inspection-details" class="inspection-details" hidden></div>
+  </dialog>
 </body>
 </html>
