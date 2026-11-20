@@ -88,9 +88,15 @@ def frozen_test(root):
     return rows
 
 
-def evaluate(root, output, houdan_path, imgsz):
+def evaluate(root, output, houdan_path, imgsz, *, candidates=None, split="test"):
     # Check eligibility and hashes before loading any model.
     data = frozen_test(root)
+    if split == "val":
+        data = read_json(root / "manifest.json")["splits"]["val"]
+    elif split != "test":
+        raise ValueError("Expected val or test.")
+    if set(CLASSES) != {b["label"] for r in data for b in r["annotation"]["boxes"]}:
+        raise ValueError("Evaluation split requires both target classes.")
     settings = {**SETTINGS, "imgsz": imgsz}
     import torch
     import ultralytics
@@ -104,10 +110,20 @@ def evaluate(root, output, houdan_path, imgsz):
     cv2.setNumThreads(2)
     models = {
         "revalue-yolo11n": YOLO(str(bundled)),
-        "houdan-yolo11s": load_houdan(houdan_path, YOLO, torch),
+
     }
-    if models["revalue-yolo11n"].names != NAMES:
-        raise ValueError("Bundled model's class names are unexpected.")
+    hashes = {"revalue-yolo11n": BUNDLED_SHA}
+    for name, path in (candidates or {}).items():
+        if name in ("houdan-yolo11s", "revalue-yolo11n"):
+            raise ValueError("Reserved model name.")
+        hashes[name] = digest(path)
+        models[name] = YOLO(str(path))
+    if any(model.names != NAMES for model in models.values()):
+        raise ValueError("Unexpected two-class checkpoint names or order.")
+
+    if houdan_path is not None:
+        models["houdan-yolo11s"] = load_houdan(houdan_path, YOLO, torch)
+        hashes["houdan-yolo11s"] = HOUDAN_SHA
 
     output.mkdir(mode=0o700)
     trackers = {name: DetMetrics(NAMES) for name in models}
@@ -115,18 +131,20 @@ def evaluate(root, output, houdan_path, imgsz):
     extra = {name: Counter() for name in models}
     timings = {name: [] for name in models}
     rows = []
-    first = cv2.imread(str(root / "images/test" / f'{data[0]["id"]}.png'))
+    first = cv2.imread(str(root / "images" / split / f'{data[0]["id"]}.png'))
     for model in models.values():
         for _ in range(3):
             model.predict(first, **settings)
     for index, row in enumerate(data):
         i = row["id"]
-        frame = cv2.imread(str(root / "images/test" / f"{i}.png"))
+        frame = cv2.imread(str(root / "images" / split / f"{i}.png"))
         if frame is None or frame.shape[:2] != (row["height"], row["width"]):
             raise ValueError(f"Unexpected image dimensions for {i}.")
         targets = [(*b["xyxy"], b["label"]) for b in row["annotation"]["boxes"]]
         classes = np.array([CLASSES.index(box[4]) for box in targets], dtype=int)
-        order = tuple(models) if index % 2 == 0 else tuple(reversed(models))
+        names = list(models)
+        offset = index % len(names)
+        order = names[offset:] + names[:offset]
         for name in order:
             start = perf_counter()
             prediction = models[name].predict(frame, **settings)[0]
@@ -189,7 +207,7 @@ def evaluate(root, output, houdan_path, imgsz):
     write_json(output / "private_errors.json", rows)
     write_json(output / "summary.json", {
         "models": summary, "image_count": len(data), "manifest_sha256": digest(root / "manifest.json"),
-        "weights_sha256": {"revalue-yolo11n": BUNDLED_SHA, "houdan-yolo11s": HOUDAN_SHA},
+        "weights_sha256": hashes, "split": split,
         "settings": settings, "operating_confidence": CONFIDENCE, "match_iou": .50, "cpu_threads": torch.get_num_threads(),
         "torch": torch.__version__, "ultralytics": ultralytics.__version__, "platform": platform.platform(),
         "utc": datetime.now(timezone.utc).isoformat(),
