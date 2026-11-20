@@ -150,3 +150,15 @@ python fyp/benchmark/import_dataset.py --root "$BENCHMARK" \
 ```
 
 For YOLO use `--format yolo --annotations data.yaml --upstream-split test` and image-directory splits declared in the YAML. For Pascal VOC use `--format voc --images JPEGImages --annotations Annotations` with standard one-based inclusive boxes. Import each supplied split separately and audit after intake. Move no data based on the upstream split alone. Orientation must already be normalized with the labels. The tool skips corrupt images or invalid annotations, records the issues privately, and returns a nonzero exit if any were skipped. All records start in `pool`; mapped boxes live in `source_references/` and never populate human labels or reviews. Broken Interfaces SVG display markings retain their original interpretation and are not converted to crack/scratch ground truth.
+
+## Published Broken Interfaces markings
+
+The private cloud pool includes 85 original author overlays for the non-practice display crops. In the local annotator, open **View authors’ damage markings** in Annotate mode to inspect a matching published reference. Draw your own boxes on the original image. The overlay is unavailable for reserved practice or validation/test photos and is hidden in Review mode. An author trace is a location hint and carries no ReValue class or clean status.
+
+To stage the same references in another dedicated private pool after registering the 95 crops and reserving the practice set, run the following with the audited upstream checkout.
+
+```bash
+python fyp/benchmark/broken_interfaces_references.py --root "$BENCHMARK" --checkout /private/broken-interfaces
+```
+
+The private `source_overlays/audit.json` records file hashes and basic image-quality observations. [Source and access follow-up](training/SOURCES.md#acquisition-follow-up-on-20-november-2026)

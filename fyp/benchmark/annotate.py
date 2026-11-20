@@ -56,7 +56,7 @@ def handler(root, port):
                     self.json(proposal_for(root, parts[1]))
                 except (ValueError, OSError):
                     self.json({"error": "No proposal is available for this training photo."}, 404)
-            elif len(parts) == 2 and parts[0] in ("record", "image"):
+            elif len(parts) == 2 and parts[0] in ("record", "image", "source-overlay"):
                 try:
                     identifier = key(parts[1])
                     path = root / "records" / f"{identifier}.json"
@@ -65,11 +65,22 @@ def handler(root, port):
                         self.send((root / "images" / f"{identifier}.png").read_bytes(), "image/png")
                     else:
                         row = json.loads(raw)
+                        overlay = root / "source_overlays" / f"{identifier}.png"
+                        overlay_available = (
+                            not practice_only and identifier not in practice_ids(root)
+                            and row["split"] in ("pool", "train") and overlay.is_file()
+                        )
+                        if parts[0] == "source-overlay":
+                            if not overlay_available:
+                                raise ValueError("Source overlay unavailable.")
+                            self.send(overlay.read_bytes(), "image/png")
+                            return
                         fields = ("id", "license_terms", "attribution", "view", "width", "height",
                                   "annotation", "review", "split")
                         self.json({
                             **{f: row[f] for f in fields}, "revision": sha256(raw).hexdigest(),
                             "practice_only": practice_only,
+                            "source_overlay_available": overlay_available,
                             "proposal_available": row["split"] == "train" and row.get("model_assisted", False)
                             and (root / "proposals" / f"{identifier}.json").is_file(),
                         })

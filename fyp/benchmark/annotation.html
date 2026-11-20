@@ -40,6 +40,11 @@ small { color: #bbb; }
     <label id="labelLabel">Class for next box <select id="label"><option>generic_crack</option><option>scratch</option></select></label>
     <small id="drawingHelp">Drag corners around the mark. Cyan boxes are cracks; yellow boxes are scratches.</small>
     <ol id="boxes"></ol>
+    <details id="sourceOverlay" hidden>
+      <summary>View authors’ damage markings</summary>
+      <p>Use these unclassified markings to locate possible damage. Check the original photo to decide what it shows and draw your own boxes.</p>
+      <img id="overlayPhoto" alt="Published author markings on the same display crop" style="width:100%">
+    </details>
     <button id="showProposals" type="button" hidden>Inspect training proposals</button>
     <ol id="proposals" hidden></ol>
     <p id="prior"></p>
@@ -93,6 +98,8 @@ async function load() {
   drag = null;
   if (row.practice_only) mode.querySelector('option[value="review"]')?.remove();
   proposals = [];
+  get('sourceOverlay').open = false;
+  get('overlayPhoto').removeAttribute('src');
   image = new Image();
   image.onload = size;
   image.src = offline ? offline.image(id) : '/image/' + id;
@@ -104,6 +111,7 @@ async function load() {
 }
 function renderPanels() {
   const review = mode.value === 'review';
+  get('sourceOverlay').hidden = review || !row?.source_overlay_available;
   get('showProposals').hidden = review || !row?.proposal_available;
   get('proposals').hidden = review || !proposals.length;
   get('proposals').replaceChildren(...(review ? [] : proposals.map((proposal, index) => {
@@ -233,6 +241,10 @@ window.addEventListener('beforeunload', e => {
     e.returnValue = '';
   }
 });
+get('sourceOverlay').ontoggle = () => {
+  const panel = get('sourceOverlay');
+  if (panel.open && !panel.hidden && row) get('overlayPhoto').src = '/source-overlay/' + row.id;
+};
 get('zoom').onchange = size;
 window.onresize = size;
 get('showProposals').onclick = async () => {
