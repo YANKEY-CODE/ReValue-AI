@@ -2,6 +2,8 @@
 
 [Open the training notebook in Google Colab](https://colab.research.google.com/github/YANKEY-CODE/ReValue-AI/blob/training/colab-yolo11/fyp/training/ReValue_Colab.ipynb)
 
+[Prepare a downloaded official SSGD ZIP on Windows](SSGD_WINDOWS.md)
+
 ## Start here
 
 1. Prepare an approved frozen export using the workflow below. Upload the **contents of the export** to a private `My Drive/ReValue-FYP/frozen/` folder. Its immediate children should include `manifest.json`, `images/` and `labels/`. A Roboflow ZIP or a folder of photos alone cannot be used here. Verify that the source terms and permissions cover research processing on your Google Drive and Colab account.
