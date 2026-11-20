@@ -11,18 +11,20 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from .assessment_receipt import PRICEABLE_BASES, issue_receipt, verify_receipt
 from .device_identification import identify_device
 from .exterior_analysis import analyze_exterior
 from .grading_rules import grade_from_atomic_damage
-from .local_valuation import local_fallback_valuation
-from .market_evidence import exterior_grade_error_response, normalize_exterior_grade, parse_storage_gb, retrieve_current_market_evidence
+from .image_upload import EXTERIOR_VIEWS, decode_image
+from .live_estimate import build_live_estimate
+from .market_evidence import canonicalize_confirmed_device, exterior_grade_error_response, normalize_exterior_grade, retrieve_current_market_evidence
 from .phone_catalogue import confirm_device, get_catalogue_device, search_catalogue
 from .schemas import ImageInput, MergedDamage, YoloDetection
-from .valuation import value_from_market_observations
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 APP_HTML = APP_DIR / "ReValue-AI-Prototype-v1.16.1-predeployment-preview.html"
 VENDOR_DIR = Path(__file__).resolve().parents[1] / "vendor"
+MAX_JSON_BYTES = 56 * 1024 * 1024
 SESSION_TTL_SECONDS = 60 * 60
 REMOTE_VIEWS = ["front", "back", "camera", "left_side", "right_side"]
 REMOTE_VIEW_LABELS = {
@@ -33,6 +35,24 @@ REMOTE_VIEW_LABELS = {
     "right_side": "Right Side",
 }
 REMOTE_SESSIONS: dict[str, dict[str, Any]] = {}
+
+
+def _uploaded_images(payload: dict[str, Any]) -> list[ImageInput]:
+    items = payload.get("images")
+    if not isinstance(items, list) or not 1 <= len(items) <= 5:
+        raise ValueError("Expected one to five labelled exterior images.")
+    try:
+        images = [ImageInput(**item) for item in items]
+    except TypeError as exc:
+        raise ValueError("Each image must contain a view and optional image fields.") from exc
+    if any(
+        not isinstance(image.view, str) or image.view not in EXTERIOR_VIEWS
+        or any(value is not None and not isinstance(value, str)
+               for value in (image.filename, image.mime_type, image.bytes_b64))
+        for image in images
+    ):
+        raise ValueError("Use an exterior view label and text image fields.")
+    return images
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -87,7 +107,7 @@ def _cleanup_sessions() -> None:
 
 def _new_session(origin: str) -> dict[str, Any]:
     _cleanup_sessions()
-    token = f"RVA-LIVE-{secrets.token_hex(4).upper()}"
+    token = f"RVA-LIVE-{secrets.token_urlsafe(18)}"
     now = time.time()
     session = {
         "session_id": token,
@@ -115,7 +135,7 @@ def _public_session(session: dict[str, Any], *, include_images: bool = True) -> 
         "expires_at_epoch": session["expires_at_epoch"],
         "received_count": received,
         "required_count": len(REMOTE_VIEWS),
-        "complete": received == len(REMOTE_VIEWS) and session["status"] in {"ready", "complete"},
+        "complete": received == len(REMOTE_VIEWS) and session["status"] == "complete",
         "views": views,
     }
 
@@ -156,46 +176,69 @@ def _remote_capture_page(token: str) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#061b20">
-<title>ReValue AI Remote Exterior Scan</title>
-<style>
-:root{{--bg:#061b20;--panel:#0a252b;--line:#1f4a52;--teal:#16d9c5;--cyan:#83f7e9;--lime:#b9ff78;--gold:#f5c451;--ink:#f5fbfa;--muted:#9db8bb}}
-*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;background:radial-gradient(circle at 90% -10%,rgba(22,217,197,.25),transparent 34%),linear-gradient(180deg,#061b20,#041418);color:var(--ink);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}}
-.wrap{{max-width:520px;margin:0 auto;padding:18px 16px 30px}}.brand{{font-weight:900;display:flex;align-items:center;gap:9px;margin-bottom:20px}}.mark{{width:34px;height:34px;border-radius:12px;background:linear-gradient(135deg,var(--teal),var(--lime));display:grid;place-items:center;color:#052126;font-weight:900}}
-.eyebrow{{font-size:11px;letter-spacing:.12em;color:var(--teal);font-weight:900}}h1{{font-size:30px;line-height:1.05;margin:8px 0 10px}}.card{{border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,rgba(16,52,60,.96),rgba(7,31,37,.96));padding:15px;box-shadow:0 18px 55px rgba(0,0,0,.34)}}
-.progress{{display:flex;gap:7px;margin:12px 0 14px}}.dot{{flex:1;height:8px;border-radius:999px;background:#082229;border:1px solid rgba(131,247,233,.12)}}.dot.done{{background:linear-gradient(90deg,var(--teal),var(--lime))}}.dot.current{{background:var(--gold)}}.stage{{font-weight:900;color:var(--cyan);margin-bottom:10px}}
-.camera{{position:relative;min-height:330px;border:1px solid rgba(131,247,233,.18);border-radius:20px;background:#031519;display:grid;place-items:center;overflow:hidden}}video,img{{width:100%;height:100%;min-height:330px;object-fit:cover;display:block}}.guide{{position:absolute;inset:30px;border:2px dashed rgba(131,247,233,.7);border-radius:30px;pointer-events:none;box-shadow:0 0 30px rgba(22,217,197,.15)}}.hint{{color:var(--muted);font-size:13px;text-align:center;padding:28px;line-height:1.45}}
-button{{width:100%;border:0;border-radius:16px;padding:15px 16px;margin-top:11px;font:inherit;font-weight:900;cursor:pointer}}.primary{{background:linear-gradient(120deg,var(--teal),var(--lime));color:#052126}}.secondary{{background:#09252b;color:var(--ink);border:1px solid var(--line)}}.row{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}.doneText{{display:none;text-align:center;padding:28px 10px;color:var(--lime);font-weight:900}}.doneText span{{display:block;color:var(--muted);font-size:13px;margin-top:8px;font-weight:600}}input{{display:none}}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f6f8f5">
+<title>ReValue AI | Remote exterior capture</title>
+<link rel="stylesheet" href="/revalue-design.css">
+<link rel="stylesheet" href="/revalue-remote.css">
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><div class="mark">RV</div>ReValue AI</div>
-  <div class="eyebrow">REMOTE CAMERA</div>
+  <div class="rv-brand"><span class="rv-mark" aria-hidden="true">RV</span>ReValue AI</div>
+  <div class="rv-eyebrow">Remote camera</div>
   <h1>Exterior Scan</h1>
-  <section class="card" id="captureCard">
-    <div class="stage" id="stage">1 of 5 Â· Front</div>
-    <div class="progress" id="progress"></div>
+  <section class="rv-card card" id="captureCard">
+    <div class="stage" id="stage" role="status">1 of 5 · Front</div>
+    <div class="progress" id="progress" aria-hidden="true"></div>
     <div class="camera" id="cameraBox"><div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div></div>
-    <input id="fileInput" type="file" accept="image/*" capture="environment">
-    <button class="primary" type="button" onclick="openCamera()">Take Photo</button>
-    <div class="row" id="previewActions" style="display:none"><button class="secondary" type="button" onclick="retake()">Retake</button><button class="primary" type="button" onclick="usePhoto()">Use Photo</button></div>
-    <button class="primary" id="sendBtn" type="button" onclick="sendPhotos()" style="display:none">Send Photos</button>
+    <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" capture="environment" hidden>
+    <button class="rv-button" type="button" onclick="openCamera()">Take Photo</button>
+    <div class="row" id="previewActions" style="display:none"><button class="rv-button-secondary" type="button" onclick="retake()">Retake</button><button class="rv-button" type="button" onclick="usePhoto()">Use Photo</button></div>
+    <button class="rv-button" id="sendBtn" type="button" onclick="sendPhotos()" style="display:none">Send Photos</button>
+    <p class="rv-alert" id="captureError" role="alert" hidden></p>
   </section>
-  <section class="card doneText" id="doneText">Photos sent successfully<span>You can return to the other device.</span></section>
+  <section class="rv-card card doneText" id="doneText" role="status">Photos sent successfully<span>You can return to the other device.</span></section>
 </div>
 <script>
 const SESSION_ID={json.dumps(token)};
 const VIEWS={json.dumps(REMOTE_VIEWS)};
 const LABELS={labels};
 let current=0, pending=null;
-function render(){{document.getElementById('stage').textContent=`${{Math.min(current+1,VIEWS.length)}} of ${{VIEWS.length}} Â· ${{LABELS[VIEWS[current]]||''}}`;document.getElementById('progress').innerHTML=VIEWS.map((v,i)=>`<i class="dot ${{i<current?'done':i===current?'current':''}}"></i>`).join('');document.getElementById('sendBtn').style.display=current>=VIEWS.length?'block':'none'}}
-function openCamera(){{document.getElementById('fileInput').click()}}
-document.getElementById('fileInput').addEventListener('change',e=>{{const file=e.target.files&&e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{{pending={{name:file.name,type:file.type||'image/jpeg',data:String(reader.result)}};document.getElementById('cameraBox').innerHTML=`<img src="${{pending.data}}" alt="Preview"><div class="guide"></div>`;document.getElementById('previewActions').style.display='grid'}};reader.readAsDataURL(file)}});
+function render(){{document.getElementById('stage').textContent=current<VIEWS.length?`${{current+1}} of ${{VIEWS.length}} · ${{LABELS[VIEWS[current]]}}`:'All five views ready';document.getElementById('progress').innerHTML=VIEWS.map((v,i)=>`<i class="dot ${{i<current?'done':i===current?'current':''}}"></i>`).join('');document.getElementById('sendBtn').style.display=current>=VIEWS.length?'block':'none'}}
+function openCamera(){{if(posting||current>=VIEWS.length)return;document.getElementById('fileInput').click()}}
+document.getElementById('fileInput').addEventListener('change',e=>{{const file=e.target.files&&e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{{pending={{name:file.name,type:file.type||'image/jpeg',data:String(reader.result)}};document.getElementById('cameraBox').innerHTML=`<img src="${{pending.data}}" alt="Preview"><div class="guide"></div>`;document.getElementById('previewActions').style.display='grid'}};reader.onerror=()=>alert('Could not read the image. Please try another photo.');reader.readAsDataURL(file)}});
 function retake(){{pending=null;document.getElementById('previewActions').style.display='none';document.getElementById('cameraBox').innerHTML='<div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div>';document.getElementById('fileInput').value=''}}
-async function usePhoto(){{if(!pending)return;const view=VIEWS[current];const bytes=pending.data.split(',')[1]||'';await fetch(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/photo`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{view,filename:pending.name,mime_type:pending.type,bytes_b64:bytes}})}});current++;pending=null;document.getElementById('previewActions').style.display='none';document.getElementById('fileInput').value='';document.getElementById('cameraBox').innerHTML='<div class="hint">Use the camera or upload a clear photo.</div><div class="guide"></div>';render()}}
-async function sendPhotos(){{await fetch(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/complete`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:'{{}}'}});document.getElementById('captureCard').style.display='none';document.getElementById('doneText').style.display='block'}}
+let posting=false;
+const captureError=document.getElementById("captureError");
+function showCaptureError(message){{captureError.textContent=message;captureError.hidden=!message}}
+async function postCapture(path, payload){{
+  const response=await fetch(path,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error||'Upload failed. Please try again.');
+}}
+async function usePhoto(){{
+  if(!pending||posting||current>=VIEWS.length)return;
+  posting=true;
+  showCaptureError('');
+  try{{
+    await postCapture(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/photo`,{{
+      view:VIEWS[current],filename:pending.name,mime_type:pending.type,bytes_b64:pending.data.split(',')[1]||''
+    }});
+    current++;
+    retake();
+    render();
+  }}catch(error){{showCaptureError(error.message)}}finally{{posting=false}}
+}}
+async function sendPhotos(){{
+  if(posting||current<VIEWS.length)return;
+  posting=true;
+  showCaptureError('');
+  try{{
+    await postCapture(`/remote-session/${{encodeURIComponent(SESSION_ID)}}/complete`,{{}});
+    document.getElementById('captureCard').style.display='none';
+    document.getElementById('doneText').style.display='block';
+  }}catch(error){{showCaptureError(error.message)}}finally{{posting=false}}
+}}
 render();
 </script>
 </body>
@@ -203,11 +246,20 @@ render();
 
 
 class ReValueHandler(BaseHTTPRequestHandler):
+    allow_external_photo_verification = True
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
+        if length < 0:
+            raise ValueError("Invalid Content-Length")
+        if length > MAX_JSON_BYTES:
+            raise OverflowError("Request exceeds upload limit")
         if not length:
             return {}
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Expected a JSON object")
+        return payload
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
@@ -277,7 +329,15 @@ class ReValueHandler(BaseHTTPRequestHandler):
         _json_response(self, 404, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        payload = self._read_json()
+        try:
+            payload = self._read_json()
+        except OverflowError:
+            self.close_connection = True
+            _json_response(self, 413, {"status": "error", "error": "Request exceeds upload limit."})
+            return
+        except ValueError:
+            _json_response(self, 400, {"status": "error", "error": "Expected a valid JSON object."})
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/remote-session":
@@ -297,8 +357,14 @@ class ReValueHandler(BaseHTTPRequestHandler):
             if view not in REMOTE_VIEWS:
                 _json_response(self, 400, {"status": "error", "error": "valid_view_required"})
                 return
-            if not payload.get("bytes_b64"):
-                _json_response(self, 400, {"status": "error", "error": "image_bytes_required"})
+            try:
+                image = ImageInput(view=view, mime_type=payload.get("mime_type") or "image/jpeg", bytes_b64=payload.get("bytes_b64"))
+                decode_image(image).close()
+            except ValueError as exc:
+                _json_response(self, 400, {"status": "error", "error": str(exc)})
+                return
+            except ImportError:
+                _json_response(self, 503, {"status": "error", "error": "Image dependencies unavailable."})
                 return
             session["views"][view] = {
                 "view": view,
@@ -324,10 +390,17 @@ class ReValueHandler(BaseHTTPRequestHandler):
                 return
             session["status"] = "complete"
             session["completed_at_epoch"] = time.time()
-            _json_response(self, 200, _public_session(session))
+            _json_response(self, 200, _public_session(session, include_images=False))
             return
         if self.path == "/identify-device":
-            images = [ImageInput(**item) for item in payload.get("images", [])]
+            try:
+                images = _uploaded_images(payload)
+                for image in images:
+                    if image.bytes_b64 is not None:
+                        decode_image(image).close()
+            except ValueError as exc:
+                _json_response(self, 400, {"status": "error", "error": str(exc)})
+                return
             _json_response(self, 200, asdict(identify_device(images)))
             return
 
@@ -343,8 +416,25 @@ class ReValueHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/analyze-exterior":
-            images = [ImageInput(**item) for item in payload.get("images", [])]
-            _json_response(self, 200, analyze_exterior(images))
+            try:
+                images = _uploaded_images(payload)
+            except ValueError as exc:
+                _json_response(self, 400, {"status": "error", "error": str(exc)})
+                return
+            device = None
+            if "confirmed_device" in payload:
+                ok, error, device = canonicalize_confirmed_device(payload["confirmed_device"])
+                if not ok:
+                    _json_response(self, 400, {"status": "error", "error": error})
+                    return
+            result = analyze_exterior(
+                images, run_gemini_verification=(self.allow_external_photo_verification
+                                                 and payload.get("verify_with_gemini", True) is True),
+            )
+            if device and result["status"] == "ok" and result["assessment_basis"] in PRICEABLE_BASES:
+                result["assessment_receipt"] = issue_receipt(device, result["grade"]["exterior_grade"], result["assessment_basis"])
+            status = {"error": 400, "blocked": 503}.get(result["status"], 200)
+            _json_response(self, status, result)
             return
 
         if self.path == "/market-evidence/retrieve":
@@ -382,96 +472,32 @@ class ReValueHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/live-valuation":
-            confirmed_device = payload.get("confirmed_device")
-            exterior_grade = payload.get("exterior_grade")
-            if not normalize_exterior_grade(exterior_grade):
+            grade = normalize_exterior_grade(payload.get("exterior_grade"))
+            if not grade:
                 _json_response(self, 200, exterior_grade_error_response())
                 return
-            if not confirmed_device:
-                _json_response(
-                    self,
-                    200,
-                    {
-                        "status": "error",
-                        "currency": "MYR",
-                        "value_low": None,
-                        "value_high": None,
-                        "midpoint": None,
-                        "exact_model_count": 0,
-                        "condition_matched_count": 0,
-                        "evidence_status": "error",
-                        "distribution": {},
-                        "trade_in_benchmark": [],
-                        "repair_references": [],
-                        "sources": [],
-                        "limitations": ["Public live valuation requires confirmed_device and exterior_grade."],
-                        "retryable": False,
-                        "error": "confirmed_device_required",
-                    },
-                )
+            ok, error, device = canonicalize_confirmed_device(payload.get("confirmed_device"))
+            if not ok or device is None:
+                _json_response(self, 200, {"status": "error", "error": error, "value_low": None, "value_high": None})
                 return
-
-            market_evidence = retrieve_current_market_evidence(
-                confirmed_device=confirmed_device,
-                exterior_grade=exterior_grade,
-            )
-            if market_evidence.get("status") != "ok" or not market_evidence.get("market_observations"):
-                if market_evidence.get("error") not in {
-                    "confirmed_device_required",
-                    "catalogue_id_required",
-                    "storage_required",
-                    "catalogue_id_not_found",
-                    "confirmed_device_identity_mismatch",
-                    "storage_confirmation_required",
-                    "valid_exterior_grade_required",
-                }:
-                    fallback_device = market_evidence.get("query_device") or confirmed_device
-                    fallback = local_fallback_valuation(
-                        confirmed_device=fallback_device,
-                        exterior_grade=str(exterior_grade),
-                        fallback_reason=str(market_evidence.get("status") or market_evidence.get("error") or "live_retrieval_unavailable"),
-                    )
-                    fallback["live_retrieval_status"] = market_evidence.get("status")
-                    fallback["live_retrieval_error"] = market_evidence.get("error")
-                    _json_response(self, 200, fallback)
+            valuation_basis = payload.get("valuation_basis", "manual_grade")
+            if valuation_basis == "exterior_scan":
+                assessment_basis = verify_receipt(payload.get("assessment_receipt"), device, grade)
+                if not assessment_basis:
+                    _json_response(self, 409, {
+                        "status": "pending", "error": "Scan evidence is missing or expired. Re-run the exterior scan.",
+                        "value_low": None, "value_high": None,
+                    })
                     return
-                _json_response(
-                    self,
-                    200,
-                    {
-                        "status": market_evidence.get("status"),
-                        "currency": "MYR",
-                        "value_low": None,
-                        "value_high": None,
-                        "midpoint": None,
-                        "exact_model_count": 0,
-                        "condition_matched_count": 0,
-                        "evidence_status": market_evidence.get("status"),
-                        "distribution": {},
-                        "trade_in_benchmark": market_evidence.get("trade_in_benchmarks", []),
-                        "repair_references": market_evidence.get("repair_references", []),
-                        "sources": [],
-                        "limitations": market_evidence.get("notes", []),
-                        "retryable": market_evidence.get("retryable", False),
-                        "error": market_evidence.get("error"),
-                        "grounded_sources": market_evidence.get("grounded_sources", []),
-                    },
-                )
+            elif valuation_basis == "manual_grade":
+                assessment_basis = "manual_grade"
+            else:
+                _json_response(self, 400, {"status": "error", "error": "Unknown valuation basis."})
                 return
-            query_device = market_evidence.get("query_device") or confirmed_device or {}
-            storage_gb = parse_storage_gb(query_device.get("storage"))
-            result = value_from_market_observations(
-                observations=market_evidence.get("market_observations", []),
-                brand=query_device.get("brand", ""),
-                model=query_device.get("model", ""),
-                storage_gb=storage_gb,
-                condition_group=market_evidence.get("condition_group"),
-                trade_in_benchmark=market_evidence.get("trade_in_benchmarks", []),
-                repair_references=market_evidence.get("repair_references", []),
-            )
-            payload_result = asdict(result)
-            payload_result["grounded_sources"] = market_evidence.get("grounded_sources", [])
-            _json_response(self, 200, payload_result)
+            market = retrieve_current_market_evidence(confirmed_device=device, exterior_grade=grade)
+            result = build_live_estimate(device, grade, market)
+            result["assessment_basis"] = assessment_basis
+            _json_response(self, 200, result)
             return
 
         _json_response(self, 404, {"error": "not_found"})

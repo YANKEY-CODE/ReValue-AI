@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import base64
-import os
-import tempfile
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
+from .image_upload import decode_image
 from .schemas import DamageType, ImageInput, ViewType, YoloDetection
 
 
 YOLO_MODEL_NAME = "revalue_exterior_yolo11n_v0.2"
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "revalue_exterior_yolo11n_v0.2.pt"
-ULTRALYTICS_CONFIG_DIR = Path(__file__).resolve().parents[2] / "Ultralytics"
 DEFAULT_IMGSZ = 640
 DEFAULT_CONF = 0.25
+_INFERENCE_LOCK = Lock()
 RAW_CLASS_NAMES = {
     0: "generic_crack",
     1: "scratch",
@@ -41,39 +40,19 @@ def map_yolo_class_to_damage_type(raw_class: str, view: ViewType) -> DamageType 
 @lru_cache(maxsize=1)
 def load_yolo_model(model_path: str = str(DEFAULT_MODEL_PATH)) -> Any:
     path = Path(model_path)
-    if not path.exists():
-        raise YoloDetectorUnavailable(f"YOLO model weights not found: {path}")
+    if not path.is_file():
+        raise YoloDetectorUnavailable("The configured exterior model weights were not found.")
     try:
-        ULTRALYTICS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        os.environ.setdefault("YOLO_CONFIG_DIR", str(ULTRALYTICS_CONFIG_DIR))
-        from ultralytics import YOLO  # type: ignore
-    except Exception as exc:  # pragma: no cover - environment dependent
-        raise YoloDetectorUnavailable(
-            "Ultralytics YOLO is not installed. Install backend requirements before real inference."
-        ) from exc
-    return YOLO(str(path))
-
-
-def _suffix_for_mime(mime_type: str | None) -> str:
-    mime = (mime_type or "").lower()
-    if "png" in mime:
-        return ".png"
-    if "webp" in mime:
-        return ".webp"
-    return ".jpg"
-
-
-def _write_temp_image(image: ImageInput) -> Path:
-    if not image.bytes_b64:
-        raise ValueError(f"Image for view '{image.view}' does not include bytes_b64.")
+        from ultralytics import YOLO
+    except ImportError as exc:
+        raise YoloDetectorUnavailable("Install the exterior model dependencies.") from exc
     try:
-        raw = base64.b64decode(image.bytes_b64, validate=True)
+        model = YOLO(str(path))
+        if model.task != "detect":
+            raise ValueError("Expected detection weights")
+        return model
     except Exception as exc:
-        raise ValueError(f"Invalid base64 image payload for view '{image.view}'.") from exc
-    handle = tempfile.NamedTemporaryFile(delete=False, suffix=_suffix_for_mime(image.mime_type))
-    with handle:
-        handle.write(raw)
-    return Path(handle.name)
+        raise YoloDetectorUnavailable("The configured exterior detection model could not be loaded.") from exc
 
 
 def _to_list(value: Any) -> list[Any]:
@@ -86,7 +65,7 @@ def _to_list(value: Any) -> list[Any]:
     return list(value)
 
 
-def _detections_from_result(result: Any, view: ViewType) -> list[YoloDetection]:
+def _detections_from_result(result: Any, view: ViewType, source: str) -> list[YoloDetection]:
     boxes = getattr(result, "boxes", None)
     if boxes is None or len(boxes) == 0:
         return []
@@ -108,7 +87,7 @@ def _detections_from_result(result: Any, view: ViewType) -> list[YoloDetection]:
                 confidence=float(confidence_raw),
                 view=view,
                 bounding_box_xyxy=[float(v) for v in xyxy_raw],
-                source=YOLO_MODEL_NAME,
+                source=source,
                 requires_gemini_resolution=mapped is None,
             )
         )
@@ -122,21 +101,23 @@ def detect_exterior_damage(
     imgsz: int = DEFAULT_IMGSZ,
     conf: float = DEFAULT_CONF,
 ) -> list[YoloDetection]:
-    model = load_yolo_model(model_path)
-    all_detections: list[YoloDetection] = []
-    temp_paths: list[Path] = []
-    try:
-        for image in images:
-            path = _write_temp_image(image)
-            temp_paths.append(path)
+    import numpy as np
 
-        results = model.predict(source=[str(path) for path in temp_paths], imgsz=imgsz, conf=conf, verbose=False, batch=1)
-        for image, result in zip(images, results):
-            all_detections.extend(_detections_from_result(result, image.view))
-    finally:
-        for path in temp_paths:
-            try:
-                path.unlink(missing_ok=True)
-            except Exception:
-                pass
-    return all_detections
+    if not images:
+        raise ValueError("At least one exterior image is required.")
+    # Ultralytics accepts in-memory BGR arrays. Keep images off disk and preserve view order.
+    with _INFERENCE_LOCK:
+        frames = [np.asarray(decode_image(image))[:, :, ::-1].copy() for image in images]
+        try:
+            model = load_yolo_model(model_path)
+            results = model.predict(source=frames, imgsz=imgsz, conf=conf, verbose=False, save=False)
+            model_name = Path(model_path).stem
+            return [
+                detection
+                for image, result in zip(images, results, strict=True)
+                for detection in _detections_from_result(result, image.view, model_name)
+            ]
+        except YoloDetectorUnavailable:
+            raise
+        except Exception as exc:
+            raise YoloDetectorUnavailable("Exterior model inference did not complete.") from exc

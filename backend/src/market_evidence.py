@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import re
 import time
 from dataclasses import asdict
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from .gemini_client import GEMINI_MODEL, GeminiAuthorizationRequired, GeminiClient, GeminiTemporaryUnavailable
+from .gemini_client import GeminiAuthorizationRequired, GeminiClient, GeminiTemporaryUnavailable
 from .phone_catalogue import get_catalogue_device, match_catalogue_candidate, normalize_storage, normalize_text
 from .schemas import MarketObservation
 
@@ -97,7 +98,7 @@ class MarketEvidenceProvider(Protocol):
 
 class GeminiGroundedMarketEvidenceProvider:
     def __init__(self, client: GeminiClient | None = None) -> None:
-        self.client = client or GeminiClient(model=GEMINI_MODEL)
+        self.client = client or GeminiClient()
 
     def retrieve(self, confirmed_device: dict[str, Any], condition_group: str) -> dict[str, Any]:
         prompt = build_market_search_prompt(confirmed_device, condition_group)
@@ -118,7 +119,7 @@ def clear_market_cache() -> None:
 
 
 def canonicalize_confirmed_device(confirmed_device: dict[str, Any] | None) -> tuple[bool, str, dict[str, Any] | None]:
-    if not confirmed_device:
+    if not isinstance(confirmed_device, dict) or not confirmed_device:
         return False, "confirmed_device_required", None
     catalogue_id = str(confirmed_device.get("catalogue_id") or "").strip()
     storage = str(confirmed_device.get("storage") or "").strip()
@@ -164,7 +165,7 @@ def condition_group_from_exterior_grade(exterior_grade: str | None) -> str:
 
 
 def normalize_exterior_grade(exterior_grade: str | None) -> str:
-    grade = (exterior_grade or "").strip().upper()
+    grade = exterior_grade.strip().upper() if isinstance(exterior_grade, str) else ""
     return grade if grade in VALID_EXTERIOR_GRADES else ""
 
 
@@ -199,13 +200,19 @@ def parse_storage_gb(value: Any) -> int | None:
 
 
 def parse_price(value: Any) -> float | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value).replace("RM", "").replace("MYR", "").replace(",", "").strip()
-    match = re.search(r"\d+(?:\.\d+)?", text)
-    return float(match.group(0)) if match else None
+        try:
+            parsed = float(value)
+        except OverflowError:
+            return None
+    else:
+        match = re.fullmatch(r"(?:(?:RM|MYR)\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)", str(value).strip(), re.I)
+        if not match:
+            return None
+        parsed = float(match.group(1).replace(",", ""))
+    return parsed if math.isfinite(parsed) else None
 
 
 def normalize_price_type(value: Any) -> str:
@@ -248,7 +255,7 @@ def _cache_key(confirmed_device: dict[str, Any], condition_group: str) -> str:
 
 
 def _dedupe_key(obs: MarketObservation) -> tuple[str, str, str, str, str]:
-    url = normalize_text(obs.source_url)
+    url = normalize_source_url(obs.source_url)
     if url:
         return ("url", url, "", "", "")
     return (
@@ -264,8 +271,13 @@ def normalize_source_url(value: str | None) -> str:
     text = (value or "").strip()
     if not text:
         return ""
-    parsed = urlparse(text)
-    scheme = parsed.scheme.lower() or "https"
+    try:
+        parsed = urlparse(text)
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    if scheme != "https" or not parsed.hostname or parsed.username or parsed.password or not parsed.path.strip("/"):
+        return ""
     netloc = parsed.netloc.lower()
     path = parsed.path.rstrip("/") or "/"
     query_items = []
@@ -274,7 +286,7 @@ def normalize_source_url(value: str | None) -> str:
         if lowered in TRACKING_QUERY_NAMES or any(lowered.startswith(prefix) for prefix in TRACKING_QUERY_PREFIXES):
             continue
         query_items.append((key, val))
-    query = urlencode(query_items, doseq=True)
+    query = urlencode(sorted(query_items), doseq=True)
     return urlunparse((scheme, netloc, path, "", query, ""))
 
 
@@ -284,7 +296,9 @@ def grounded_sources_from_payload(provider_payload: dict[str, Any]) -> list[dict
         candidates = provider_payload.get("_grounded_sources", [])
     sources = []
     seen = set()
-    for item in candidates or []:
+    for item in candidates if isinstance(candidates, list) else []:
+        if not isinstance(item, dict):
+            continue
         url = normalize_source_url(str(item.get("url") or item.get("uri") or ""))
         if not url or url in seen:
             continue
@@ -335,6 +349,8 @@ def classify_freshness(observed_at: str | None, retrieved_at: str | None = None)
                 reference = reference.replace(tzinfo=timezone.utc)
         except ValueError:
             reference = datetime.now(timezone.utc)
+    if parsed.date() > reference.date():
+        return "unknown"
     return "fresh" if (reference - parsed).days <= 90 else "stale"
 
 
@@ -383,6 +399,8 @@ def validate_market_observations(
     grounded_sources = grounded_sources or []
 
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         price_type = normalize_price_type(row.get("price_type"))
         condition_text = str(row.get("condition_text") or row.get("condition") or "")
         row_condition_group = normalize_condition_group(row.get("condition_group") or condition_text)
@@ -425,7 +443,7 @@ def validate_market_observations(
 
         reason = ""
         text_reason = _exclusion_from_text(title, condition_text, price_type)
-        if not observation.source or not observation.source_url:
+        if not observation.source or not normalize_source_url(observation.source_url):
             reason = "missing_source_or_url"
         elif price is None or price <= 0:
             reason = "missing_or_invalid_price"
@@ -561,6 +579,8 @@ def retrieve_current_market_evidence(
     provider = provider or GeminiGroundedMarketEvidenceProvider()
     try:
         provider_payload = provider.retrieve(canonical_device, condition_group)
+        if not isinstance(provider_payload, dict) or not isinstance(provider_payload.get("market_observations"), list):
+            raise ValueError("Invalid market provider response")
     except GeminiAuthorizationRequired as exc:
         return {
             "status": "blocked",
@@ -600,7 +620,7 @@ def retrieve_current_market_evidence(
             "notes": ["No market rows were fabricated after the retryable retrieval failure."],
             "cache_hit": False,
         }
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError):
         return {
             "status": "error",
             "stage": "market_evidence_retrieval",
@@ -609,7 +629,7 @@ def retrieve_current_market_evidence(
             "condition_group": condition_group,
             "internal_assessment_status": "not_assessed",
             "retryable": False,
-            "error": str(exc),
+            "error": "Market evidence provider returned no usable response.",
             "market_observations": [],
             "usable_observation_count": 0,
             "excluded_observation_count": 0,

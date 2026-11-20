@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f8f5">
+  <title>ReValue AI | Compare damage detectors</title>
+  <link rel="stylesheet" href="/revalue-design.css">
+  <link rel="stylesheet" href="/model_comparison.css">
+  <script defer src="/model_comparison.js"></script>
+</head>
+<body>
+  <a class="rv-skip rv-button" href="#comparison">Skip to content</a>
+  <header class="rv-header">
+    <div class="rv-header-inner">
+      <div class="rv-brand"><span class="rv-mark"><svg class="rv-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="7" y="3.5" width="10" height="17" rx="2.6"/><path d="M10 7h4m-3 10.5h2M4 8h2m-2 8h2m12-8h2m-2 8h2" stroke-linecap="round"/></svg></span>ReValue AI</div>
+      <span class="rv-context">Local comparison tool</span>
+    </div>
+  </header>
+  <main id="comparison">
+    <header class="comparison-intro">
+      <div class="rv-eyebrow">Qualitative model comparison</div>
+      <h1>Compare damage detectors</h1>
+      <p>Inspect predictions from ReValue YOLO11n and experimental Houdan YOLO11s on the same photos. Accuracy requires independently verified annotations.</p>
+    </header>
+    <div class="workspace-grid">
+      <form id="compare-form" class="rv-card compare-card">
+        <h2>Photos for this comparison</h2>
+        <p class="rv-muted">Up to 20 JPEG, PNG or WebP images. Each can be up to 8 MiB and 16 megapixels.</p>
+        <div id="drop-zone" class="drop-zone">
+          <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M4 16l4-4 4 4 4-6 4 5"/><circle cx="9" cy="8.5" r="1"/></svg>
+          <label for="photos" class="file-label">Smartphone photos</label>
+          <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple>
+          <span class="drop-hint">Or drop files here</span>
+        </div>
+        <ul id="file-queue" class="file-queue" aria-label="Selected photos" hidden></ul>
+        <p id="status" role="status">Connecting to the local comparison…</p>
+        <progress id="batch-progress" aria-label="Photos processed" max="1" value="0" hidden></progress>
+        <div class="toolbar"><button class="rv-button" id="compare" type="submit" disabled>Compare photos</button></div>
+      </form>
+      <aside class="rv-card compare-card settings-card" aria-labelledby="settings-heading">
+        <h2 id="settings-heading">Run settings</h2>
+        <p class="rv-muted">Both models use the same settings and run on this computer.</p>
+        <dl id="settings" class="settings-grid"><div><dt>Runtime</dt><dd>Connecting…</dd></div></dl>
+      </aside>
+    </div>
+    <section class="results-section" aria-labelledby="results-heading">
+      <div class="results-head">
+        <h2 id="results-heading">Results</h2>
+        <div class="export-actions">
+          <button class="rv-button-secondary" id="csv" type="button" disabled>Export CSV</button>
+          <button class="rv-button-secondary" id="json" type="button" disabled>Export JSON</button>
+        </div>
+      </div>
+      <div class="result-empty" id="result-empty">Add photos and run a comparison to see both detectors side by side.</div>
+      <div id="result-legend" class="result-legend" aria-label="Bounding box legend" hidden>
+        <span><i data-class="generic_crack"></i>Crack</span><span><i data-class="scratch"></i>Scratch</span><span><i data-class="bump"></i>Bump</span><span><i data-class="paint"></i>Paint</span>
+      </div>
+      <div id="results" aria-label="Comparison results"></div>
+    </section>
+  </main>
+  <dialog id="inspect-dialog" class="inspection" aria-label="Enlarged model image inspection">
+    <div class="inspection-header">
+      <h2 id="inspection-title">Inspect photo</h2>
+      <button class="rv-button-secondary" id="close-inspect" type="button">Close inspection</button>
+    </div>
+    <div class="zoom-controls">
+      <button class="rv-button-secondary" id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <output id="zoom-level" aria-live="polite">100%</output>
+      <button class="rv-button-secondary" id="zoom-in" type="button" aria-label="Zoom in">+</button>
+    </div>
+    <div id="zoom-area" class="zoom-area" tabindex="0" aria-label="Image inspection area"></div>
+    <div id="inspection-details" class="inspection-details" hidden></div>
+  </dialog>
+</body>
+</html>

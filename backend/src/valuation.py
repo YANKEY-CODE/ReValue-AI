@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from math import isfinite
 from statistics import median
 from typing import Any
 
@@ -99,7 +100,7 @@ def value_from_market_observations(
         and obs.model.lower() == model.lower()
         and (storage_gb is None or obs.storage_gb == storage_gb)
         and obs.currency.upper() in {currency.upper(), "RM", "MYR"}
-        and obs.price is not None
+        and type(obs.price) in (int, float) and isfinite(obs.price) and obs.price > 0
         and normalize_price_type(obs.price_type) in RESALE_PRICE_TYPES
         and (obs.usable_for_market_range or not obs.exclusion_reason)
     ]

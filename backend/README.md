@@ -1,5 +1,7 @@
 # ReValue AI Phase 6A.3 Backend
 
+For the current FYP1 setup, verification and evaluation workflow, see the [FYP development guide](../fyp/README.md).
+
 This backend is the server-side foundation for real exterior intelligence.
 
 Working locally without external dependencies:

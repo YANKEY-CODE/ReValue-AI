@@ -1,0 +1,187 @@
+"""HTTP regressions for guided exterior scans and remote capture."""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import sys
+import threading
+import unittest
+from http.server import ThreadingHTTPServer
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from backend.src.device_identification import identify_device
+from backend.src.exterior_analysis import analyze_exterior
+from backend.src.exterior_verification import verify_damage_with_gemini
+from backend.src.gemini_client import GeminiTemporaryUnavailable
+from backend.src.schemas import GeminiDamageVerification, ImageInput, YoloDetection
+from backend.src.server import REMOTE_SESSIONS, REMOTE_VIEWS, ReValueHandler
+from backend.src.yolo_detector import YoloDetectorUnavailable
+
+
+def photo(view):
+    data = BytesIO()
+    Image.new("RGB", (64, 64), (254, 254, sum(map(ord, view)) % 127 + 128)).save(data, format="PNG")
+    return {"view": view, "mime_type": "image/png", "bytes_b64": base64.b64encode(data.getvalue()).decode()}
+
+
+class ExteriorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), ReValueHandler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
+        REMOTE_SESSIONS.clear()
+
+    def request(self, path, data=None):
+        body = data if isinstance(data, bytes) else json.dumps(data).encode() if data is not None else None
+        url = f"http://127.0.0.1:{self.server.server_port}{path}"
+        try:
+            response = urlopen(Request(url, data=body), timeout=30)
+        except HTTPError as exc:
+            response = exc
+        with response:
+            return response.status, json.load(response)
+
+    def test_invalid_bodies_and_photos_cannot_produce_a_grade(self):
+        for body in (b"{", [], {"images": "bad"}, {"images": [photo("front")]},
+                     {"images": [photo("front"), photo("back") | {"bytes_b64": "bm90IGEgcGhvdG8="}]}):
+            with self.subTest(body_type=type(body)):
+                status, result = self.request("/analyze-exterior", body)
+                self.assertEqual(status, 400)
+                self.assertEqual(result.get("grade", {}).get("exterior_grade", "pending"), "pending")
+
+    def test_identification_rejects_invalid_upload_before_provider(self):
+        with patch("backend.src.server.identify_device") as identification:
+            for payload in ({"images": ["wrong"]}, {"images": [photo("unrecognized")]},
+                            {"images": [photo("front") | {"bytes_b64": "!!!"}]}):
+                status, result = self.request("/identify-device", payload)
+                self.assertEqual((status, result["status"]), (400, "error"))
+            identification.assert_not_called()
+
+    def test_identification_does_not_invent_candidates_on_invalid_provider_reply(self):
+        class MalformedClient:
+            model = "test-provider"
+
+            def generate_structured(self, **kwargs):
+                return {"top_candidates": [{"model": ["wrong"], "visual_evidence": [None]}]}
+
+        result = identify_device([ImageInput(**photo("front"))], client=MalformedClient())
+        self.assertEqual(result.status, "error")
+        self.assertTrue(result.requires_user_confirmation)
+        self.assertEqual(result.candidates, [])
+
+    def test_duplicate_views_block_model_and_pending_scan_cannot_request_price(self):
+        images = [photo("front"), photo("front") | {"view": "back"}]
+        with patch("backend.src.exterior_analysis.detect_exterior_damage") as detector:
+            status, result = self.request("/analyze-exterior", {"images": images})
+            self.assertEqual((status, result["grade"]["exterior_grade"]), (400, "pending"))
+            detector.assert_not_called()
+        results = self.request("/catalogue/search?q=iPhone%2013%20Pro")[1]["results"]
+        item = next(x for x in results if x["model"] == "iPhone 13 Pro")
+        device = {"catalogue_id": item["catalogue_id"], "storage": "256GB"}
+        with patch("backend.src.server.retrieve_current_market_evidence") as market:
+            status, result = self.request("/live-valuation", {"confirmed_device": device, "exterior_grade": "A",
+                                                              "valuation_basis": "exterior_scan"})
+            self.assertEqual((status, result["status"], result["value_low"]), (409, "pending", None))
+            market.assert_not_called()
+        with patch("backend.src.exterior_analysis.detect_exterior_damage", return_value=[]):
+            status, analysis = self.request("/analyze-exterior", {"images": [photo("front"), photo("back")],
+                                            "confirmed_device": device, "verify_with_gemini": False})
+        self.assertEqual((status, analysis["gemini_status"]), (200, "skipped"))
+        with patch("backend.src.server.retrieve_current_market_evidence", return_value={"status": "blocked"}):
+            status, result = self.request("/live-valuation", {"confirmed_device": device, "exterior_grade": "A",
+                "valuation_basis": "exterior_scan", "assessment_receipt": analysis["assessment_receipt"]})
+        self.assertEqual((status, result["assessment_basis"], result["value_low"]), (200, "provisional", None))
+
+    def test_verifier_only_damage_stays_pending(self):
+        images = [ImageInput(**photo(view)) for view in ("front", "back")]
+        finding = GeminiDamageVerification("scratch", "back", "uncertain")
+        with patch("backend.src.exterior_analysis.verify_damage_with_gemini", return_value=("ok", [finding])):
+            result = analyze_exterior(images, detector=lambda _: [])
+        self.assertEqual((result["assessment_basis"], result["grade"]["exterior_grade"]), ("review_required", "pending"))
+
+    def test_model_failure_leaves_grade_pending(self):
+        with patch("backend.src.exterior_analysis.detect_exterior_damage", side_effect=YoloDetectorUnavailable("load failed")):
+            status, result = self.request("/analyze-exterior", {"images": [photo("front"), photo("back")]})
+        self.assertEqual((status, result["grade"]["exterior_grade"]), (503, "pending"))
+
+    def test_uncorroborated_and_disputed_predictions_are_distinct(self):
+        images = [ImageInput(**photo(view)) for view in REMOTE_VIEWS]
+        candidate = YoloDetection("screen_crack", 0.8, "front", "generic_crack")
+        result = analyze_exterior(images, detector=lambda _: [candidate], run_gemini_verification=False)
+        self.assertEqual((result["grade"]["exterior_grade"], result["assessment_basis"]), ("C", "provisional"))
+        for status, grade, basis in [("supports", "C", "ai_corroborated"), ("uncertain", "pending", "review_required")]:
+            verification = GeminiDamageVerification("screen_crack", "front", status)
+            with patch("backend.src.exterior_analysis.verify_damage_with_gemini", return_value=("ok", [verification])):
+                result = analyze_exterior(images, detector=lambda _: [candidate])
+            self.assertEqual((result["grade"]["exterior_grade"], result["assessment_basis"]), (grade, basis))
+        side_crack = YoloDetection(None, 0.7, "right_side", "generic_crack", requires_gemini_resolution=True)
+        result = analyze_exterior(images, detector=lambda _: [side_crack], run_gemini_verification=False)
+        self.assertEqual(result["grade"]["exterior_grade"], "pending")
+
+    def test_optional_verifier_outage_is_reported(self):
+        class UnavailableClient:
+            def generate_structured(self, **kwargs):
+                raise GeminiTemporaryUnavailable("fallback")
+
+        self.assertEqual(
+            verify_damage_with_gemini(images=[], yolo_detections=[], client=UnavailableClient()),
+            ("temporarily_unavailable", []),
+        )
+
+    def test_optional_verifier_rejects_invalid_structured_findings(self):
+        with patch("backend.src.exterior_verification.GeminiClient") as client:
+            generate = client.return_value.generate_structured
+            finding = {"damage_type": "scratch", "view": "front", "status": "supports",
+                       "severity": "minor", "visual_evidence": ["Visible line"]}
+            images = [ImageInput(**photo("front"))]
+            generate.return_value = {"verifications": [finding]}
+            self.assertEqual(verify_damage_with_gemini(images=images, yolo_detections=[])[0], "ok")
+            for change in ({"status": []}, {"view": "back"}, {"visual_evidence": "Visible line"}):
+                generate.return_value = {"verifications": [finding | change]}
+                self.assertEqual(verify_damage_with_gemini(images=images, yolo_detections=[]),
+                                 ("verification_failed", []))
+
+    def test_remote_upload_needs_valid_photos_and_explicit_completion(self):
+        _, session = self.request("/remote-session", {})
+        path = f"/remote-session/{session['session_id']}"
+        self.assertEqual(self.request(path + "/photo", photo("front") | {"bytes_b64": "!!!"})[0], 400)
+        self.assertEqual(self.request(path + "/complete", {})[0], 400)
+        for view in REMOTE_VIEWS:
+            status, response = self.request(path + "/photo", photo(view))
+            self.assertEqual(status, 200)
+            self.assertFalse(response["complete"])
+            self.assertNotIn("bytes_b64", response["views"][view])
+        self.assertTrue(self.request(path + "/complete", {})[1]["complete"])
+        response = self.request(path)[1]
+        self.assertEqual(response["received_count"], 5)
+        self.assertTrue(response["views"]["right_side"]["bytes_b64"])
+        self.assertEqual(self.request(path + "/photo", photo("front"))[0], 409)
+
+    @unittest.skipUnless(os.environ.get("REVALUE_TEST_REAL_MODEL") == "1", "opt-in CPU inference check")
+    def test_bundled_model_processes_five_guided_photos(self):
+        with patch("backend.src.exterior_analysis.verify_damage_with_gemini", return_value=("not_configured", [])):
+            status, response = self.request("/analyze-exterior", {"images": [photo(view) for view in REMOTE_VIEWS]})
+        self.assertEqual((status, response["assessment_basis"]), (200, "provisional"))
+        self.assertEqual(response["detections"], [])
+        self.assertEqual(response["grade"]["exterior_grade"], "A")
+
+
+if __name__ == "__main__":
+    unittest.main()

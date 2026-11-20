@@ -1,0 +1,17 @@
+.wrap { width: min(100% - 28px, 530px); margin: 20px auto 32px; }
+.wrap > .rv-brand { margin-bottom: 22px; }
+.wrap h1 { margin: 6px 0 14px; font-size: clamp(1.8rem, 5vw, 2.3rem); letter-spacing: -.035em; }
+.card { padding: 16px; }
+.stage { font-weight: 700; color: var(--rv-accent); }
+.progress { display: flex; gap: 6px; margin: 9px 0 13px; }
+.dot { flex: 1; height: 6px; border-radius: 4px; background: var(--rv-soft); border: 1px solid var(--rv-border); }
+.dot.done { background: var(--rv-accent); border-color: var(--rv-accent); }
+.dot.current { background: #c8e1cf; border-color: #83aa8e; }
+.camera { position: relative; min-height: 200px; display: grid; place-items: center; overflow: hidden; text-align: center; background: var(--rv-soft); border: 1px solid var(--rv-border); border-radius: 9px; }
+.camera img { display: block; max-width: 100%; max-height: 390px; object-fit: contain; }
+.hint { color: var(--rv-muted); padding: 15px; }
+.card button { width: 100%; margin-top: 10px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.doneText { display: none; }
+.doneText span { display: block; color: var(--rv-muted); }
+#captureError { margin-top: 10px; }

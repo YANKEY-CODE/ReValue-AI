@@ -1,0 +1,12 @@
+# Windows x64 with CPython 3.12. Install the +cpu wheels from PyTorch first.
+-r requirements.txt
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+google-genai==3.6.1
+ultralytics==8.4.215
+opencv-python==5.1.0.95
+pillow==13.0.0
+fastapi==0.165.0
+uvicorn==0.54.0
+qrcode==8.2
+PyYAML==6.0.3

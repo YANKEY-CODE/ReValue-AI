@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: revalue-fyp-supervisor
+    runtime: docker
+    repo: https://github.com/YANKEY-CODE/ReValue-AI
+    branch: fyp1-development
+    region: singapore
+    plan: standard
+    autoDeployTrigger: 'off'
+    healthCheckPath: /healthz
+    envVars:
+      - key: REVALUE_DEMO_PASSWORD
+        sync: false
