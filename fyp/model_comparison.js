@@ -11,6 +11,25 @@ const LABELS = { generic_crack: 'Crack', scratch: 'Scratch', bump: 'Bump', paint
 let metadata;
 let records = [];
 
+const inspectDialog = document.getElementById('inspect-dialog');
+const inspectContent = document.getElementById('inspect-content');
+const closeInspect = document.getElementById('close-inspect');
+closeInspect.addEventListener('click', () => inspectDialog.close());
+inspectDialog.addEventListener('click', event => {
+  if (event.target === inspectDialog) inspectDialog.close();
+});
+
+function inspectPanel(panel, title) {
+  inspectContent.replaceChildren();
+  const heading = element('h2', title);
+  const copy = panel.cloneNode(true);
+  copy.querySelector('.inspect-button')?.remove();
+  inspectContent.append(heading, copy);
+  inspectDialog.showModal();
+  closeInspect.focus();
+}
+
+
 function element(tag, label, className) {
   const node = document.createElement(tag);
   if (label !== undefined) node.textContent = label;
@@ -28,7 +47,15 @@ function renderPanel(title, photo, image, report) {
   img.alt = title;
   view.append(img);
   panel.append(view);
-  if (!report) return panel;
+  const inspect = element('button', 'Inspect image larger', 'inspect-button');
+  inspect.type = 'button';
+  inspect.setAttribute('aria-label', 'Inspect ' + title + ' image larger');
+  inspect.addEventListener('click', () => inspectPanel(panel, title));
+  // Insert the action after the rendered image and its annotations.
+  if (!report) {
+    panel.append(inspect);
+    return panel;
+  }
 
   const overlay = element('div', undefined, 'overlay');
   overlay.setAttribute('aria-hidden', 'true');
@@ -56,6 +83,7 @@ function renderPanel(title, photo, image, report) {
   panel.append(counts, element('p', `CPU inference ${report.cpu_inference_ms.toFixed(1)} ms · whole prediction ${report.cpu_predict_wall_ms.toFixed(1)} ms`, 'timing'));
   if (report.detections.length) panel.append(list);
   else panel.append(element('p', 'No detections at 0.25.'));
+  panel.append(inspect);
   return panel;
 }
 
