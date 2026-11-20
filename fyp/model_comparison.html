@@ -5,58 +5,105 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ReValue AI | Qualitative model comparison</title>
   <style>
-    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #172229; background: #f2f6f5; }
-    * { box-sizing: border-box; }
-    body { margin: 0; }
-    main { max-width: 1320px; margin: auto; padding: 32px clamp(16px, 4vw, 48px); }
-    h1 { font-size: clamp(1.65rem, 4vw, 2.7rem); line-height: 1.1; margin: 0 0 .75rem; }
-    h2, h3 { margin: 0 0 .75rem; }
-    p { line-height: 1.5; margin: .5rem 0; }
-    .intro { max-width: 68ch; color: #344e54; }
-    .controls, article { background: #fff; border: 1px solid #c8d8d7; border-radius: 14px; padding: 20px; margin-top: 20px; }
-    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-    label { font-weight: 650; display: block; margin-bottom: 8px; }
-    input { max-width: 100%; }
-    button { font: inherit; border: 1px solid #066451; border-radius: 8px; padding: 8px 14px; background: #fff; color: #13453b; font-weight: 650; cursor: pointer; }
-    button[type=submit] { background: #066451; color: #fff; }
-    button:disabled { opacity: .55; cursor: default; }
-    :focus-visible { outline: 3px solid #3e65ce; outline-offset: 3px; }
-    .panel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-    .panel { min-width: 0; border: 1px solid #e0e9e7; padding: 12px; border-radius: 10px; }
-    .panel h3 { font-size: 1rem; min-height: 2.5em; }
-    .photo { position: relative; background: #23383c; }
-    .photo img { width: 100%; height: 100%; display: block; object-fit: fill; }
-    .overlay { position: absolute; inset: 0; }
-    .box { position: absolute; border: 2px solid var(--box, #fff); }
-    .box[data-class=generic_crack] { --box: #ffd45b; }
-    .box[data-class=scratch] { --box: #59ecd4; }
-    .box[data-class=bump] { --box: #bfcbff; }
-    .box[data-class=paint] { --box: #ffafd6; }
-    .box span { position: absolute; top: 0; left: 0; font-size: .72rem; line-height: 1.2; padding: 2px 4px; white-space: nowrap; background: #101e25; color: var(--box); }
-    .counts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    .counts span { background: #e3f2ed; padding: 3px 7px; border-radius: 5px; font-size: .88rem; }
-    .timing, .detections { font-size: .89rem; }
-    .detections { padding-left: 20px; margin-bottom: 0; }
-    .detections li { margin: 4px 0; }
-    .error { color: #9b1d31; }
-    article h2 { font-size: 1.15rem; overflow-wrap: anywhere; }
-    @media (max-width: 760px) {
-      .panel-grid { grid-template-columns: 1fr; }
-      .panel h3 { min-height: 0; }
+
+    :root { color-scheme:light; font-family:Inter,"Segoe UI",system-ui,sans-serif; color:#183139; background:#f5f8f7; --green:#087d69; --line:#d7e5e0; --muted:#5b7178; }
+    *,*:before,*:after { box-sizing:border-box; }
+    body { margin:0;min-height:100vh;background:radial-gradient(800px 320px at 80% -200px,#e0f5e9,transparent),#f5f8f7; }
+    button,input { font:inherit; }
+    button { cursor:pointer; }
+    button:disabled { opacity:.52;cursor:not-allowed; }
+    :focus-visible { outline:3px solid #42b99e;outline-offset:3px; }
+    .topbar { background:#fff;border-bottom:1px solid var(--line); }
+    .topbar-inner { max-width:1420px;margin:auto;padding:16px clamp(18px,4vw,52px);display:flex;gap:14px;align-items:center;justify-content:space-between; }
+    .brand { display:flex;align-items:center;gap:11px;font-size:1rem;font-weight:800;letter-spacing:-.02em;color:#173a33; }
+    .logo { width:38px;height:38px;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:1rem; }
+    .workspace-tag { border:1px solid #c9dfd4;background:#edf8f2;border-radius:999px;padding:6px 10px;color:#126b55;font-size:.74rem;font-weight:750; }
+    main { max-width:1420px;margin:auto;padding:clamp(22px,4vw,48px); }
+    .intro-layout { display:flex;align-items:flex-start;justify-content:space-between;gap:22px;flex-wrap:wrap; }
+    .eyebrow { color:var(--green);font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;font-weight:800;margin:0 0 8px; }
+    h1 { font-size:clamp(2rem,4vw,3rem);letter-spacing:-.047em;line-height:1.08;margin:0 0 12px; }
+    h2,h3 { letter-spacing:-.02em; }
+    p { line-height:1.65;margin:.4rem 0; }
+    .intro { max-width:70ch;color:var(--muted);font-size:.95rem; }
+    .protocol { background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 16px;font-size:.78rem;color:#466467;line-height:1.65;max-width:310px; }
+    .protocol b { display:block;color:#173d36;margin-bottom:2px; }
+    .controls, article { background:#fff;border:1px solid var(--line);border-radius:20px;padding:clamp(17px,2vw,26px);margin-top:22px;box-shadow:0 10px 30px rgba(19,72,56,.05); }
+    .controls h2 { font-size:1.22rem;margin:0 0 6px; }
+    .controls-lede { color:var(--muted);font-size:.88rem; }
+    .upload-control { margin:17px 0 12px;padding:23px;border:1.5px dashed #9fcbbd;border-radius:15px;background:#f6fbf8; }
+    label { font-weight:750;display:block;margin-bottom:8px; }
+    input[type=file] { display:block;max-width:100%;width:100%;font-size:.89rem; }
+    input[type=file]::file-selector-button { background:#fff;border:1px solid #a8cfc1;color:#095f50;border-radius:9px;padding:9px 12px;margin-right:12px;font-weight:750;cursor:pointer; }
+    .upload-control p { color:var(--muted);font-size:.81rem;margin:10px 0 0; }
+    #settings { background:#edf7f2;color:#205a4b;padding:9px 12px;border-radius:10px;font-size:.83rem;display:inline-block;max-width:100%;overflow-wrap:anywhere; }
+    .toolbar { display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px; }
+    button { border:1px solid #c2dacf;border-radius:10px;padding:11px 16px;background:#fff;color:#0d6b59;font-weight:750;transition:background .16s,border-color .16s; }
+    button:hover:not(:disabled) { background:#eff8f3;border-color:#8bb9a7; }
+    button[type=submit] { background:var(--green);color:#fff;border-color:var(--green); }
+    button[type=submit]:hover:not(:disabled) { background:#086c5b; }
+    #status { color:#48666d;font-size:.86rem;min-height:1.5em;margin:14px 0 0; }
+    .results-heading { display:flex;gap:12px;justify-content:space-between;align-items:baseline;margin-top:35px; }
+    .results-heading h2 { font-size:1.42rem;margin:0; }
+    .results-heading p { color:var(--muted);font-size:.85rem;margin:0; }
+    .legend { display:flex;flex-wrap:wrap;gap:9px;margin-top:13px; }
+    .legend span { border-radius:999px;background:#fff;border:1px solid var(--line);padding:5px 11px;font-size:.74rem;font-weight:700; }
+    .legend .crack { color:#845d0c; }.legend .scratch { color:#0e756c; }.legend .bump { color:#4e5bb8; }.legend .paint { color:#a63c74; }
+    article h2 { font-size:1.15rem;margin:0 0 18px;overflow-wrap:anywhere;color:#17343a; }
+    .panel-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start; }
+    .panel { min-width:0;border:1px solid #e0eae6;padding:14px;border-radius:14px;background:#fcfefd; }
+    .panel h3 { font-size:.98rem;min-height:2.3em;margin:0 0 12px;color:#1e4141; }
+    .photo { position:relative;background:#eaf1ee;border:1px solid #e0eae5;border-radius:9px;overflow:hidden; }
+    .photo img { width:100%;height:100%;display:block;object-fit:fill; }
+    .overlay { position:absolute;inset:0;pointer-events:none; }
+    .box { position:absolute;border:2px solid var(--box,#fff);box-shadow:0 0 0 1px rgba(0,0,0,.38); }
+    .box[data-class=generic_crack] { --box:#f0bb38; }
+    .box[data-class=scratch] { --box:#36decb; }
+    .box[data-class=bump] { --box:#919ff1; }
+    .box[data-class=paint] { --box:#ff8cc9; }
+    .box span { position:absolute;top:0;left:0;font-size:.73rem;line-height:1.3;padding:3px 5px;white-space:nowrap;background:#14262c;color:var(--box);font-weight:750; }
+    .counts { display:flex;flex-wrap:wrap;gap:7px;margin-top:14px; }
+    .counts span { background:#e8f5ee;border:1px solid #d7ece1;border-radius:7px;padding:5px 8px;font-size:.76rem;font-weight:700;color:#245d50; }
+    .timing,.detections { font-size:.83rem;color:#546f71;line-height:1.6; }
+    .detections { padding-left:21px;margin:6px 0 0; }
+    .detections li { margin:5px 0; }
+    .error { color:#a52838;background:#fff0f2;border:1px solid #f2ced4;border-radius:10px;padding:12px; }
+    .footnote { font-size:.82rem;color:#667b7c;margin:24px 0; }
+    @media (max-width:1050px) { .panel-grid { grid-template-columns:1fr 1fr; }.panel:first-child { grid-column:1 / -1; }.panel:first-child .photo { max-width:590px;margin:auto; } }
+    @media (max-width:700px) {
+      .topbar-inner { padding:12px 16px; }
+      main { padding:20px 15px 38px; }
+      .intro-layout { display:block; }
+      .protocol { max-width:none;margin-top:16px; }
+      .controls,article { border-radius:16px;padding:16px;margin-top:17px; }
+      .upload-control { padding:16px; }
+      .panel-grid { grid-template-columns:1fr; }
+      .panel:first-child { grid-column:auto; }
+      .panel h3 { min-height:0; }
+      .results-heading { display:block; }
+      .toolbar button { flex:1 1 140px; }
     }
+    @media (prefers-reduced-motion:reduce) { *,*:before,*:after { animation:none!important;transition:none!important;scroll-behavior:auto!important; } }
+    @media print { body { background:#fff; }.topbar,.controls,.footnote { display:none; } main { max-width:none;padding:0; } article { box-shadow:none;break-inside:avoid; } .panel-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .panel:first-child { grid-column:auto; } }
   </style>
   <script defer src="/model_comparison.js"></script>
 </head>
 <body>
+  <header class="topbar"><div class="topbar-inner"><div class="brand"><span class="logo" aria-hidden="true">R</span>ReValue AI</div><span class="workspace-tag">Local research workspace</span></div></header>
   <main>
-    <header>
-      <h1>Qualitative model comparison</h1>
+    <header class="intro-layout"><div>
+      <p class="eyebrow">AI model evaluation</p>
+      <h1>Compare damage detection models</h1>
       <p class="intro">Compare ReValue YOLO11n and experimental Houdan YOLO11s on the same smartphone photos. Boxes and counts are model predictions. Accuracy requires independently verified annotations.</p>
+      </div><aside class="protocol"><b>Fair comparison settings</b>640 × 640 · Confidence 0.25 · IoU 0.70 · CPU<br>Same image, two detectors. Results are qualitative, not validated accuracy.</aside>
     </header>
     <form id="compare-form" class="controls">
+      <h2>Upload test photos</h2>
+      <p class="controls-lede">Choose your own authorized smartphone photos. Both models process each photo automatically.</p>
+      <div class="upload-control">
       <label for="photos">Smartphone photos</label>
       <input type="file" id="photos" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple required>
       <p>Select up to 20 JPEG, PNG or WebP photos, each up to 8 MiB and 16 megapixels. Photos are processed locally.</p>
+      </div>
       <p id="settings"></p>
       <div class="toolbar">
         <button id="compare" type="submit" disabled>Compare photos</button>
@@ -65,7 +112,10 @@
       </div>
       <p id="status" role="status">Connecting to the local comparison…</p>
     </form>
+    <div class="results-heading"><h2>Results</h2><p>Original photograph · ReValue YOLO11n · Houdan YOLO11s</p></div>
+    <div class="legend" aria-label="Damage classes"><span class="crack">Crack</span><span class="scratch">Scratch</span><span class="bump">Bump</span><span class="paint">Paint damage</span></div>
     <section id="results" aria-label="Comparison results"></section>
+    <p class="footnote">Model predictions are not ground-truth labels. Review suspected misses and false detections manually before drawing conclusions.</p>
   </main>
 </body>
 </html>
