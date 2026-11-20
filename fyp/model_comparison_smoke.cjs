@@ -72,6 +72,12 @@ const { chromium } = require('playwright');
     assert.equal(await page.locator('.box').count(), 3);
     assert.equal(await page.locator('.box[data-class=generic_crack]').evaluate(node => node.style.left), '12.5%');
     assert.equal(await page.locator('.counts').last().textContent(), 'Crack 1Scratch 0Bump 1Paint 1');
+    // Verify the enlarged inspection retains overlays and remains dismissible.
+    await page.getByRole('button', { name: 'Inspect Houdan YOLO11s image larger' }).click();
+    await page.getByRole('dialog', { name: 'Enlarged model image inspection' }).waitFor();
+    assert.equal(await page.locator('#inspect-dialog .box').count(), 3);
+    await page.getByRole('button', { name: 'Close inspection' }).click();
+    assert.equal(await page.getByRole('dialog', { name: 'Enlarged model image inspection' }).count(), 0);
     await page.waitForFunction(() => [...document.images].every(img => img.complete && img.naturalWidth > 0));
     const csv = await exportFile('Export CSV');
     assert.ok(csv.startsWith('\uFEFF'));
